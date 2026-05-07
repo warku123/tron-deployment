@@ -1,0 +1,62 @@
+# Single-SR private chain matching tronprotocol/system-test's expectations.
+#
+# Used by stest-up.sh to spin up the node that 649 stest testcases
+# connect to via gRPC/HTTP. Ports below align with stest's testng.conf
+# endpoint section, so testng.conf does not need editing.
+#
+# Pre-requisite: caller must drop the FullNode.jar to be tested at
+# {install_path}/FullNode.jar BEFORE running `trond apply` (or the
+# `system-test` recipe). Trond's jar runtime sees `jar.url` is unset
+# and uses the pre-placed file. This is how java-tron CI feeds the
+# PR-built jar to the test environment.
+#
+# Witness signing: stest's HOCON template (network: system-test)
+# inlines `localwitness = [...]` with two test SR keys (matching the
+# two genesis witnesses Mercury and Venus). We do NOT set
+# `witness_key` here — that would trigger trond to append an
+# override block. The template's keys are authoritative.
+#
+# Usage:
+#   sudo cp $JAR /opt/tron/stest-singlenode/FullNode.jar
+#   sudo trond apply --intent examples/system-test-singlenode-intent.yaml --wait
+# Or via recipe:
+#   sudo trond recipe run system-test --param name=stest-singlenode
+
+name: stest-singlenode
+
+target:
+  type: local
+  runtime: jar
+
+network: system-test
+
+nodes:
+  # type is set to "fullnode" (not "witness") deliberately. The actual
+  # node IS a witness — `extra_args: ["--witness"]` below ensures the
+  # FullNode CLI gets the --witness flag — but trond's intent validator
+  # requires `witness_key_env` for type: witness, which would force
+  # trond to append `localwitness = ["${ENV_VAL}"]` and OVERRIDE the
+  # template's two inline localwitness keys (HOCON last-write-wins).
+  # We need the template's two keys intact (one per genesis witness:
+  # Mercury and Venus, both must sign for 2-of-2 PBFT solidification),
+  # so we sidestep the validator by labeling the node a fullnode and
+  # forcing --witness via extra_args. The only visible consequence is
+  # the systemd unit's Description text says "TRON Fullnode Node
+  # (stest-singlenode)" instead of "Witness Node". See openspec change
+  # system-test-integration follow-ups for the cleaner long-term fix
+  # (validator opt-out flag).
+  - type: fullnode
+    extra_args: ["--witness"]
+    install_path: /opt/tron/stest-singlenode
+    resources:
+      memory: 4GB
+    ports:
+      # These match testng.conf (system-test/testcase/src/test/resources/
+      # testng.conf, top section). Don't change without updating both
+      # sides — port drift breaks every stest testcase silently.
+      http: 8090       # fullnode HTTP (testng.conf httpnode.ip.list[0])
+      grpc: 50051      # fullnode gRPC (testng.conf fullnode.ip.list[0])
+      p2p: 18888       # peer listen (template's node.listen.port)
+      jsonrpc: 8545    # jsonrpc HTTP (template's httpFullNodePort; differs
+                       # from testng.conf's 50545 — known config drift,
+                       # stest CI uses this value successfully)

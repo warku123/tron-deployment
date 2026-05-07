@@ -1,0 +1,73 @@
+name: system-test
+description: |
+  Bring up a single-SR private chain matching tronprotocol/system-test's
+  expectations, suitable for running stest's TestNG suite against. Default
+  intent_path points at examples/system-test-singlenode-intent.yaml; the
+  caller can override to use a customized intent if needed.
+
+  Pre-requisite: caller must drop the FullNode.jar to be tested at
+  {install_path}/FullNode.jar BEFORE invoking this recipe. Trond's jar
+  runtime sees jar.url is unset and uses the pre-placed file. Typical
+  shape from a CI workflow:
+
+    sudo mkdir -p /opt/tron/stest-singlenode
+    sudo cp $JAR /opt/tron/stest-singlenode/FullNode.jar
+    sudo trond recipe run system-test
+    cd system-test && ./gradlew :testcase:singleNodeBuild
+    sudo trond network destroy stest-singlenode --confirm stest-singlenode
+
+  This is the canonical replacement for java-tron CI's bare
+  `nohup java -jar build/libs/FullNode.jar --witness -c config-system-test.conf &`
+  bootstrap step (system-test.yml line 55-77).
+
+params:
+  - name: intent_path
+    type: path
+    required: false
+    default: examples/system-test-singlenode-intent.yaml
+    description: |
+      Path to a stest single-SR intent.yaml. Default is the bundled
+      example which uses ports aligned with stest's testng.conf.
+
+steps:
+  - id: validate
+    description: Catch typos before any network IO.
+    command: config validate
+    args:
+      - "{{ params.intent_path }}"
+    on_failure: abort
+
+  - id: preflight
+    description: Verify Java / memory / ports / install_path writable on target.
+    command: preflight
+    args:
+      - --intent
+      - "{{ params.intent_path }}"
+    on_failure: abort
+
+  - id: apply
+    description: |
+      Render HOCON + systemd unit, write to /etc/systemd/system, start
+      the service, and block until the FullNode HTTP endpoint responds.
+    command: apply
+    args:
+      - --intent
+      - "{{ params.intent_path }}"
+      - --auto-approve
+      - --wait
+      - --wait-timeout
+      - 5m
+    persist:
+      - name
+      - endpoints
+    on_failure: abort
+
+  - id: verify
+    description: Confirm the node is minting blocks (block_height > 0).
+    command: verify
+    args:
+      - --intent
+      - "{{ params.intent_path }}"
+      - --timeout
+      - 5m
+    on_failure: abort
