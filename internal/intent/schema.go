@@ -4,7 +4,7 @@ package intent
 type Intent struct {
 	Name    string     `yaml:"name" json:"name" validate:"required,hostname_rfc1123"`
 	Target  Target     `yaml:"target" json:"target" validate:"required"`
-	Network string     `yaml:"network" json:"network" validate:"required,oneof=mainnet nile private"`
+	Network string     `yaml:"network" json:"network" validate:"required,oneof=mainnet nile private system-test"`
 	Nodes   []NodeSpec `yaml:"nodes" json:"nodes" validate:"required,min=1,dive"`
 }
 

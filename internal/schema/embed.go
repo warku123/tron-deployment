@@ -40,7 +40,10 @@ import (
 //	        changes to existing schemas).
 //	1.2.0 — add verify-config + auto-heal schemas (new `trond
 //	        verify-config` and `trond auto-heal` commands).
-const SchemaVersion = "1.2.0"
+//	1.2.1 — config-validate.network and plan.network gain the
+//	        "system-test" value (additive enum / examples expansion;
+//	        existing clients unaffected).
+const SchemaVersion = "1.2.1"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

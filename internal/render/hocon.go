@@ -10,10 +10,15 @@ import (
 )
 
 // NetworkTemplate maps network names to their base config template file.
+// "system-test" is the canonical private-chain template used by the
+// tronprotocol/system-test test suite — selecting it gives a single-SR
+// private network with stest's genesis, committee flags, and 5-minute
+// maintenance interval, sourced from stest's release_workflow branch.
 var NetworkTemplate = map[string]string{
-	"mainnet": "main_net_config.conf",
-	"nile":    "test_net_config.conf",
-	"private": "private_net_config.conf",
+	"mainnet":     "main_net_config.conf",
+	"nile":        "test_net_config.conf",
+	"private":     "private_net_config.conf",
+	"system-test": "system-test.conf",
 }
 
 // RenderHOCON loads the base template for the network and applies intent-driven overrides.

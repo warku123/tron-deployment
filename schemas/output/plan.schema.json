@@ -49,6 +49,6 @@
       "description": "Approximate seconds the node will be down during apply; 0 for no_change paths."
     },
     "runtime": { "type": "string", "enum": ["docker", "jar"] },
-    "network": { "type": "string", "examples": ["mainnet", "nile", "private"] }
+    "network": { "type": "string", "examples": ["mainnet", "nile", "private", "system-test"] }
   }
 }

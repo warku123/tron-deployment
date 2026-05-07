@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.2.0",
+  "schema_version": "1.2.1",
   "entries": [
     {
       "name": "apply",
@@ -19,7 +19,7 @@
     },
     {
       "name": "config-validate",
-      "hash": "0a420779dffb8a08edb4261efb6311e8575621b460caae251050bcdd8c2a9704"
+      "hash": "89db39b1a9cbe40ca40b8f6d4d7df03a581d4f33256a4128d69dd64ac026a29b"
     },
     {
       "name": "diagnose",
@@ -59,7 +59,7 @@
     },
     {
       "name": "plan",
-      "hash": "d6857b5b219d39ad4fc2a29049f3da9fa4289147720412892579451b0436c0a4"
+      "hash": "a296d6c9fcaf9e8b652ce983fb180b77d48b087bc006c01d0a811eabf6df1c16"
     },
     {
       "name": "preflight",

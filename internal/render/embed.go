@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 )
 
-// embeddedTemplates contains the three base java-tron config files bundled
-// into the binary. They are the source of truth when no external template
-// directory is configured — release builds always work out of the box.
+// embeddedTemplates contains the four base java-tron config files bundled
+// into the binary (mainnet, nile, private, system-test). They are the
+// source of truth when no external template directory is configured —
+// release builds always work out of the box.
 //
 //go:embed templates/*.conf
 var embeddedTemplates embed.FS

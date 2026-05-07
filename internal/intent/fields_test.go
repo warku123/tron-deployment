@@ -196,6 +196,7 @@ func TestNetwork_Enum(t *testing.T) {
 		{"mainnet", false},
 		{"nile", false},
 		{"private", false},
+		{"system-test", false},
 		{"shasta", true},
 		{"testnet", true},
 		{"", true},

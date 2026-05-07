@@ -8,7 +8,7 @@
   "properties": {
     "valid":      { "type": "boolean" },
     "name":       { "type": "string" },
-    "network":    { "type": "string", "enum": ["mainnet", "nile", "private"] },
+    "network":    { "type": "string", "enum": ["mainnet", "nile", "private", "system-test"] },
     "node_count": { "type": "integer", "minimum": 1 },
     "explanation": {
       "type": "object",

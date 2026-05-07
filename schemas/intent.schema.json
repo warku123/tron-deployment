@@ -17,8 +17,8 @@
     },
     "network": {
       "type": "string",
-      "enum": ["mainnet", "nile", "private"],
-      "description": "TRON network to connect to"
+      "enum": ["mainnet", "nile", "private", "system-test"],
+      "description": "TRON network to connect to. \"system-test\" selects the embedded private-chain template used by tronprotocol/system-test."
     },
     "nodes": {
       "type": "array",
