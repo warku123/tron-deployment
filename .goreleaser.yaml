@@ -127,6 +127,7 @@ brews:
       owner: tronprotocol
       name: homebrew-tap
       branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/tronprotocol/tron-deployment
     description: CLI for declarative TRON node deployment
     license: MIT
