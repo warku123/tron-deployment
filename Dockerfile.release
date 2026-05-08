@@ -13,7 +13,8 @@ RUN apk add --no-cache ca-certificates docker-cli openssh-client \
 # without it.
 VOLUME ["/home/trond/.trond"]
 
-COPY trond /usr/local/bin/trond
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/trond /usr/local/bin/trond
 
 USER trond
 WORKDIR /home/trond
