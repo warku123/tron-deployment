@@ -158,8 +158,5 @@ dockers_v2:
       org.opencontainers.image.revision: "{{ .FullCommit }}"
 
 release:
-  github:
-    owner: tronprotocol
-    name: tron-deployment
   draft: false
   prerelease: auto
