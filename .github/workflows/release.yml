@@ -67,7 +67,7 @@ jobs:
         run: |
           skip=""
           [ -z "$DOCKERHUB_USERNAME" ] && skip="${skip:+$skip,}docker"
-          [ -z "$HOMEBREW_TAP_TOKEN" ] && skip="${skip:+$skip,}brew"
+          [ -z "$HOMEBREW_TAP_TOKEN" ] && skip="${skip:+$skip,}homebrew"
           echo "flags=${skip:+--skip=$skip}" >> "$GITHUB_OUTPUT"
 
       - name: Run GoReleaser
