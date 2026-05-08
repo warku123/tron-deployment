@@ -155,7 +155,11 @@ func checkDiskSpace(cmd *cobra.Command, tgt target.Target, parsed *intent.Intent
 	}
 	freeGB := free / (1024 * 1024 * 1024)
 	minGB := uint64(100) // Mainnet needs ~100GB+
-	if parsed.Network == "nile" || parsed.Network == "private" {
+	// nile / private / system-test are short-lived test chains whose DB
+	// stays in the low-GB range; reuse the relaxed 10 GB threshold for
+	// all of them. (Adding a new "test-shaped" network here is required
+	// alongside the new entry in render.NetworkTemplate.)
+	if parsed.Network == "nile" || parsed.Network == "private" || parsed.Network == "system-test" {
 		minGB = 10
 	}
 	if freeGB < minGB {
