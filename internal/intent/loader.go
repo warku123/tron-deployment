@@ -414,6 +414,31 @@ func Validate(intent *Intent) error {
 		}
 	}
 
+	// Monitoring validation
+	if err := validateMonitoring(intent.Monitoring); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateMonitoring checks monitoring field constraints.
+func validateMonitoring(m *Monitoring) error {
+	if m == nil {
+		return nil
+	}
+	if m.Prometheus.Port != 0 && (m.Prometheus.Port < 1024 || m.Prometheus.Port > 65535) {
+		return fmt.Errorf("monitoring.prometheus.port must be between 1024 and 65535, got %d", m.Prometheus.Port)
+	}
+	if m.Grafana.Port != 0 && (m.Grafana.Port < 1024 || m.Grafana.Port > 65535) {
+		return fmt.Errorf("monitoring.grafana.port must be between 1024 and 65535, got %d", m.Grafana.Port)
+	}
+	if m.Prometheus.Retention != "" {
+		matched, _ := regexp.MatchString(`^\d+[dwh]$`, m.Prometheus.Retention)
+		if !matched {
+			return fmt.Errorf("monitoring.prometheus.retention must match ^\\d+[dwh]$ (e.g. \"7d\", \"2w\"), got %q", m.Prometheus.Retention)
+		}
+	}
 	return nil
 }
 

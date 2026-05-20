@@ -4,7 +4,12 @@
   "title": "trond Intent",
   "description": "Declarative intent file for trond node deployment",
   "type": "object",
-  "required": ["name", "target", "network", "nodes"],
+  "required": [
+    "name",
+    "target",
+    "network",
+    "nodes"
+  ],
   "additionalProperties": false,
   "properties": {
     "name": {
@@ -17,7 +22,11 @@
     },
     "network": {
       "type": "string",
-      "enum": ["mainnet", "nile", "private"],
+      "enum": [
+        "mainnet",
+        "nile",
+        "private"
+      ],
       "description": "TRON network to connect to"
     },
     "nodes": {
@@ -26,17 +35,25 @@
       "items": {
         "$ref": "#/$defs/NodeSpec"
       }
+    },
+    "monitoring": {
+      "$ref": "#/$defs/Monitoring"
     }
   },
   "$defs": {
     "Target": {
       "type": "object",
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["local", "ssh"]
+          "enum": [
+            "local",
+            "ssh"
+          ]
         },
         "host": {
           "type": "string",
@@ -58,7 +75,10 @@
         },
         "runtime": {
           "type": "string",
-          "enum": ["docker", "jar"],
+          "enum": [
+            "docker",
+            "jar"
+          ],
           "default": "docker"
         },
         "auto_ports": {
@@ -68,20 +88,34 @@
         }
       },
       "if": {
-        "properties": { "type": { "const": "ssh" } }
+        "properties": {
+          "type": {
+            "const": "ssh"
+          }
+        }
       },
       "then": {
-        "required": ["host", "user"]
+        "required": [
+          "host",
+          "user"
+        ]
       }
     },
     "NodeSpec": {
       "type": "object",
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["fullnode", "witness", "solidity", "lite"]
+          "enum": [
+            "fullnode",
+            "witness",
+            "solidity",
+            "lite"
+          ]
         },
         "version": {
           "type": "string",
@@ -97,7 +131,10 @@
         },
         "process_manager": {
           "type": "string",
-          "enum": ["systemd", "nohup"],
+          "enum": [
+            "systemd",
+            "nohup"
+          ],
           "default": "systemd"
         },
         "system_user": {
@@ -125,58 +162,119 @@
         },
         "restart": {
           "type": "string",
-          "enum": ["no", "on-failure", "always", "unless-stopped"],
+          "enum": [
+            "no",
+            "on-failure",
+            "always",
+            "unless-stopped"
+          ],
           "default": "unless-stopped",
           "description": "docker-compose restart policy; mapped to systemd Restart= for jar runtime"
         },
         "extra_env": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Arbitrary environment variables to inject into the runtime"
         },
         "extra_args": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Extra CLI args appended to ./bin/FullNode after -c <conf>"
         },
         "labels": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Docker labels (or recorded in state for jar runtime)"
         },
-        "network_overrides": { "$ref": "#/$defs/NetworkOverrides" },
-        "witness_key": { "$ref": "#/$defs/WitnessKey" },
+        "network_overrides": {
+          "$ref": "#/$defs/NetworkOverrides"
+        },
+        "witness_key": {
+          "$ref": "#/$defs/WitnessKey"
+        },
         "config_overrides": {
           "type": "object",
           "additionalProperties": true,
           "description": "Arbitrary HOCON dotted-key overrides appended to the rendered config"
         },
-        "networks": { "type": "array", "items": { "type": "string" } },
-        "depends_on": { "type": "array", "items": { "type": "string" } },
-        "healthcheck": { "$ref": "#/$defs/Healthcheck" },
-        "ulimits": { "$ref": "#/$defs/Ulimits" },
-        "extra_hosts": { "type": "object", "additionalProperties": { "type": "string" } },
-        "entrypoint": { "type": "array", "items": { "type": "string" } },
-        "logging": { "$ref": "#/$defs/Logging" },
-        "shm_size": { "type": "string" },
-        "jar": { "$ref": "#/$defs/JarSource" },
-        "build": { "$ref": "#/$defs/BuildSpec" }
+        "networks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "healthcheck": {
+          "$ref": "#/$defs/Healthcheck"
+        },
+        "ulimits": {
+          "$ref": "#/$defs/Ulimits"
+        },
+        "extra_hosts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "entrypoint": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "logging": {
+          "$ref": "#/$defs/Logging"
+        },
+        "shm_size": {
+          "type": "string"
+        },
+        "jar": {
+          "$ref": "#/$defs/JarSource"
+        },
+        "build": {
+          "$ref": "#/$defs/BuildSpec"
+        }
       },
       "if": {
-        "properties": { "type": { "const": "witness" } }
+        "properties": {
+          "type": {
+            "const": "witness"
+          }
+        }
       },
       "then": {
         "anyOf": [
-          { "required": ["witness_key_env"] },
-          { "required": ["witness_key"] }
+          {
+            "required": [
+              "witness_key_env"
+            ]
+          },
+          {
+            "required": [
+              "witness_key"
+            ]
+          }
         ]
       }
     },
     "BuildSpec": {
       "type": "object",
-      "description": "Produce the deploy artifact from a local java-tron source tree. Mutually exclusive with `image:` and `jar:` — a node has exactly one artifact source. See specs/002-trond-build-pipeline/.",
+      "description": "Produce the deploy artifact from a local java-tron source tree. Mutually exclusive with `image:` and `jar:` \u2014 a node has exactly one artifact source. See specs/002-trond-build-pipeline/.",
       "additionalProperties": false,
-      "required": ["source"],
+      "required": [
+        "source"
+      ],
       "properties": {
         "source": {
           "type": "string",
@@ -188,12 +286,20 @@
         },
         "jdk": {
           "type": "string",
-          "enum": ["8", "11", "17", "21"],
+          "enum": [
+            "8",
+            "11",
+            "17",
+            "21"
+          ],
           "description": "Builder container JDK version. Defaults to 8."
         },
         "artifact": {
           "type": "string",
-          "enum": ["jar", "image"],
+          "enum": [
+            "jar",
+            "image"
+          ],
           "description": "What to produce. Phase 2 supports jar only; image is Phase 3."
         },
         "image_tag": {
@@ -202,7 +308,10 @@
         },
         "builder": {
           "type": "string",
-          "enum": ["docker", "host"],
+          "enum": [
+            "docker",
+            "host"
+          ],
           "description": "Where to run gradle. docker (default) uses a pinned eclipse-temurin container; host uses the developer's local gradle."
         },
         "gradle_task": {
@@ -211,7 +320,9 @@
         },
         "gradle_args": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Extra gradle args. Restricted to a flag-name allowlist (FR-022); --init-script and similar are rejected."
         },
         "builder_image_override": {
@@ -220,13 +331,18 @@
         },
         "env": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Allowlisted env vars forwarded into the build container: GRADLE_OPTS, JAVA_OPTS, GRADLE_USER_HOME, MAVEN_OPTS, ORG_GRADLE_PROJECT_*."
         },
         "platform": {
           "type": "string",
-          "enum": ["linux/amd64", "linux/arm64"],
-          "description": "Docker --platform for the builder container. Empty defaults to the host arch (amd64 → JDK 8, arm64 → JDK 17 per java-tron's compat matrix). Cross-arch builds use QEMU emulation (3-5× slower)."
+          "enum": [
+            "linux/amd64",
+            "linux/arm64"
+          ],
+          "description": "Docker --platform for the builder container. Empty defaults to the host arch (amd64 \u2192 JDK 8, arm64 \u2192 JDK 17 per java-tron's compat matrix). Cross-arch builds use QEMU emulation (3-5\u00d7 slower)."
         }
       }
     },
@@ -234,58 +350,122 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "seeds": { "type": "array", "items": { "type": "string" } },
-        "active_peers": { "type": "array", "items": { "type": "string" } },
-        "passive_peers": { "type": "array", "items": { "type": "string" } },
-        "p2p_version": { "type": "integer" },
-        "discovery": { "type": "boolean" },
-        "max_connections": { "type": "integer" },
-        "max_active_same_ip": { "type": "integer" },
-        "need_sync_check": { "type": "boolean" }
+        "seeds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "active_peers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "passive_peers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "p2p_version": {
+          "type": "integer"
+        },
+        "discovery": {
+          "type": "boolean"
+        },
+        "max_connections": {
+          "type": "integer"
+        },
+        "max_active_same_ip": {
+          "type": "integer"
+        },
+        "need_sync_check": {
+          "type": "boolean"
+        }
       }
     },
     "WitnessKey": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "private_key_env": { "type": "string", "description": "Env var name holding the raw hex private key" },
-        "keystore_path": { "type": "string", "description": "Path inside container to keystore file" },
-        "keystore_password_env": { "type": "string" },
-        "account_address": { "type": "string", "description": "localWitnessAccountAddress for delegated witness" }
+        "private_key_env": {
+          "type": "string",
+          "description": "Env var name holding the raw hex private key"
+        },
+        "keystore_path": {
+          "type": "string",
+          "description": "Path inside container to keystore file"
+        },
+        "keystore_password_env": {
+          "type": "string"
+        },
+        "account_address": {
+          "type": "string",
+          "description": "localWitnessAccountAddress for delegated witness"
+        }
       }
     },
     "Healthcheck": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["test"],
+      "required": [
+        "test"
+      ],
       "properties": {
-        "test": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "interval": { "type": "string" },
-        "timeout": { "type": "string" },
-        "retries": { "type": "integer" },
-        "start_period": { "type": "string" }
+        "test": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "interval": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "retries": {
+          "type": "integer"
+        },
+        "start_period": {
+          "type": "string"
+        }
       }
     },
     "Ulimits": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "nofile": { "type": "integer" }
+        "nofile": {
+          "type": "integer"
+        }
       }
     },
     "Logging": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "driver": { "type": "string" },
-        "options": { "type": "object", "additionalProperties": { "type": "string" } }
+        "driver": {
+          "type": "string"
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
       }
     },
     "JarSource": {
       "type": "object",
       "additionalProperties": false,
       "description": "Where to fetch the FullNode.jar for jar-runtime targets. trond rejects http/file/ftp; sha256 is mandatory whenever url is set.",
-      "required": ["url", "sha256"],
+      "required": [
+        "url",
+        "sha256"
+      ],
       "properties": {
         "url": {
           "type": "string",
@@ -304,18 +484,36 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "metrics": { "type": "boolean", "default": false },
-        "jsonrpc": { "type": "boolean", "default": false },
-        "rate_limit": { "type": "boolean", "default": true },
-        "event_subscribe": { "type": "boolean", "default": false }
+        "metrics": {
+          "type": "boolean",
+          "default": false
+        },
+        "jsonrpc": {
+          "type": "boolean",
+          "default": false
+        },
+        "rate_limit": {
+          "type": "boolean",
+          "default": true
+        },
+        "event_subscribe": {
+          "type": "boolean",
+          "default": false
+        }
       }
     },
     "Resources": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "memory": { "type": "string", "default": "16GB" },
-        "cpu": { "type": "string", "description": "CPU limit, e.g. '2.0' or '500m'" }
+        "memory": {
+          "type": "string",
+          "default": "16GB"
+        },
+        "cpu": {
+          "type": "string",
+          "description": "CPU limit, e.g. '2.0' or '500m'"
+        }
       }
     },
     "Storage": {
@@ -323,33 +521,128 @@
       "additionalProperties": false,
       "description": "Where to persist chain data and logs. Each field accepts an absolute path (bind-mount) or a bare name (docker named volume). Empty fields default to '<node-name>-data' / '<node-name>-logs'. If 'path' is set, 'data' and 'logs' are auto-derived as '<path>/data' and '<path>/logs'.",
       "properties": {
-        "data": { "type": "string", "description": "Source for /java-tron/output-directory (chain DB)" },
-        "logs": { "type": "string", "description": "Source for /java-tron/logs" },
-        "path": { "type": "string", "description": "Single host root; data and logs become <path>/data and <path>/logs" }
+        "data": {
+          "type": "string",
+          "description": "Source for /java-tron/output-directory (chain DB)"
+        },
+        "logs": {
+          "type": "string",
+          "description": "Source for /java-tron/logs"
+        },
+        "path": {
+          "type": "string",
+          "description": "Single host root; data and logs become <path>/data and <path>/logs"
+        }
       }
     },
     "JVMConfig": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "heap_max": { "type": "string" },
-        "heap_new": { "type": "string" },
-        "direct_memory": { "type": "string" },
-        "gc": { "type": "string", "enum": ["G1", "CMS", "auto"], "default": "auto" },
-        "gc_log": { "type": "boolean", "default": false, "description": "Opt-in. Default off so the upstream image's start.sh decides." }
+        "heap_max": {
+          "type": "string"
+        },
+        "heap_new": {
+          "type": "string"
+        },
+        "direct_memory": {
+          "type": "string"
+        },
+        "gc": {
+          "type": "string",
+          "enum": [
+            "G1",
+            "CMS",
+            "auto"
+          ],
+          "default": "auto"
+        },
+        "gc_log": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in. Default off so the upstream image's start.sh decides."
+        }
       }
     },
     "PortMapping": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "http": { "type": "integer", "default": 8090 },
-        "grpc": { "type": "integer", "default": 50051 },
-        "solidity_http": { "type": "integer", "default": 8091 },
-        "solidity_grpc": { "type": "integer", "default": 50061 },
-        "jsonrpc": { "type": "integer", "default": 8545 },
-        "p2p": { "type": "integer", "default": 18888 },
-        "metrics": { "type": "integer", "default": 9527 }
+        "http": {
+          "type": "integer",
+          "default": 8090
+        },
+        "grpc": {
+          "type": "integer",
+          "default": 50051
+        },
+        "solidity_http": {
+          "type": "integer",
+          "default": 8091
+        },
+        "solidity_grpc": {
+          "type": "integer",
+          "default": 50061
+        },
+        "jsonrpc": {
+          "type": "integer",
+          "default": 8545
+        },
+        "p2p": {
+          "type": "integer",
+          "default": 18888
+        },
+        "metrics": {
+          "type": "integer",
+          "default": 9527
+        }
+      }
+    },
+    "Monitoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, deploy Prometheus + Grafana alongside the node(s)."
+        },
+        "prometheus": {
+          "$ref": "#/$defs/PromConfig"
+        },
+        "grafana": {
+          "$ref": "#/$defs/GrafConfig"
+        }
+      }
+    },
+    "PromConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "default": 9090,
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "retention": {
+          "type": "string",
+          "default": "7d",
+          "pattern": "^\\\\d+[dwh]$",
+          "description": "How long to keep metrics. E.g. \"7d\", \"2w\", \"1h\"."
+        }
+      }
+    },
+    "GrafConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "integer",
+          "default": 3000,
+          "minimum": 1024,
+          "maximum": 65535
+        }
       }
     }
   }

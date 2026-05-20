@@ -1,9 +1,9 @@
 {
-  "schema_version": "1.5.0",
+  "schema_version": "1.6.0",
   "entries": [
     {
       "name": "apply",
-      "hash": "cef5ef5836418d685d454ba43ef914118636363b92595d75b5f32c1e23071f7a"
+      "hash": "465432f433c2358e1d2864e1fc75e68345a6926d06219ec6ef68a20df4abb11a"
     },
     {
       "name": "auto-heal",

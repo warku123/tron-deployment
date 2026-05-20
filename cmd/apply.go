@@ -20,6 +20,8 @@ var (
 	applyAutoApprove bool
 	applyWait        bool
 	applyWaitTimeout time.Duration
+	applyMonitor     bool
+	applyNoMonitor   bool
 )
 
 var applyCmd = &cobra.Command{
@@ -44,6 +46,8 @@ func init() {
 	applyCmd.Flags().BoolVar(&applyAutoApprove, "auto-approve", false, "Skip confirmation for changes (CI mode)")
 	applyCmd.Flags().BoolVar(&applyWait, "wait", false, "Block until the deployed node's HTTP API is reachable")
 	applyCmd.Flags().DurationVar(&applyWaitTimeout, "wait-timeout", 5*time.Minute, "Total wait budget when --wait is set")
+	applyCmd.Flags().BoolVar(&applyMonitor, "monitor", false, "Deploy monitoring stack (Prometheus + Grafana) alongside the node")
+	applyCmd.Flags().BoolVar(&applyNoMonitor, "no-monitor", false, "Skip monitoring stack deployment even if intent has monitoring.enabled=true")
 	mustMarkRequired(applyCmd, "intent")
 	rootCmd.AddCommand(applyCmd)
 }
@@ -56,6 +60,25 @@ func runApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, err.Error(),
 			"Check intent file syntax", "Run: trond config validate "+applyIntentPath)
+	}
+
+	// Handle CLI monitoring overrides.
+	if cmd.Flags().Changed("monitor") && cmd.Flags().Changed("no-monitor") {
+		return exitWithError("VALIDATION_ERROR", output.ExitValidationError,
+			"cannot use both --monitor and --no-monitor",
+			"Use --monitor to force enable, --no-monitor to force disable, or neither to follow intent")
+	}
+	if cmd.Flags().Changed("monitor") {
+		if parsed.Monitoring == nil {
+			parsed.Monitoring = &intent.Monitoring{}
+		}
+		parsed.Monitoring.Enabled = intent.BoolPtr(true)
+	}
+	if cmd.Flags().Changed("no-monitor") {
+		if parsed.Monitoring == nil {
+			parsed.Monitoring = &intent.Monitoring{}
+		}
+		parsed.Monitoring.Enabled = intent.BoolPtr(false)
 	}
 
 	// 2. Resolve target. SSH cert handling lives here in the cmd

@@ -1,0 +1,25 @@
+# Example: single fullnode with Prometheus + Grafana monitoring stack.
+# Run:  trond apply --intent examples/monitoring.yaml
+#       trond apply --intent examples/monitoring.yaml --no-monitor  (skip monitoring)
+
+name: monitored-node
+
+target:
+  type: local
+  runtime: docker
+
+network: mainnet
+
+monitoring:
+  enabled: true
+  prometheus:
+    port: 9090
+    retention: 7d
+  grafana:
+    port: 3000
+
+nodes:
+  - type: fullnode
+    version: latest
+    resources:
+      memory: 8GB

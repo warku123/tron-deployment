@@ -49,7 +49,11 @@ import (
 //	1.5.0 — add shadow-fork-mutate schema (new `trond shadow-fork
 //	        mutate` command — Go port of java DbFork; existing
 //	        schemas unchanged).
-const SchemaVersion = "1.5.0"
+//	1.6.0 — add monitoring schema (new `trond apply --monitor` flag
+//	        and intent `monitoring:` block; new `network-create`
+//	        `--monitor` flag; apply.output gains `monitoring_error`
+//	        and `monitoring` fields).
+const SchemaVersion = "1.6.0"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

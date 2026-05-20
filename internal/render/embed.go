@@ -14,6 +14,9 @@ import (
 //go:embed templates/*.conf
 var embeddedTemplates embed.FS
 
+//go:embed dashboards/*.json
+var embeddedDashboards embed.FS
+
 // LoadTemplate returns the raw HOCON template for the given network. When
 // templateDir is non-empty and contains the matching file, the on-disk copy
 // wins (useful for local development and tests). Otherwise we fall through
@@ -39,4 +42,9 @@ func LoadTemplate(templateDir, network string) ([]byte, error) {
 		return nil, fmt.Errorf("load embedded template %s: %w", fileName, err)
 	}
 	return data, nil
+}
+
+// LoadDashboard returns an embedded Grafana dashboard JSON by filename.
+func LoadDashboard(name string) ([]byte, error) {
+	return embeddedDashboards.ReadFile("dashboards/" + name)
 }

@@ -39,6 +39,18 @@ type ManagedNode struct {
 	// stored value is the full cache key (`<sha>-b<digest>[+dirty-...]`),
 	// not just a git revision.
 	BuildCacheKey string `json:"build_cache_key,omitempty"`
+
+	// Monitoring tracks the deployed monitoring stack for this node.
+	Monitoring *MonitoringState `json:"monitoring,omitempty"`
+}
+
+// MonitoringState records the Prometheus + Grafana stack deployed
+// alongside a node.
+type MonitoringState struct {
+	Enabled        bool   `json:"enabled"`
+	PrometheusPort int    `json:"prometheus_port"`
+	GrafanaPort    int    `json:"grafana_port"`
+	TargetType     string `json:"target_type,omitempty"` // "local" or "ssh"
 }
 
 // NodeTarget is the target info stored in state (subset of intent.Target).

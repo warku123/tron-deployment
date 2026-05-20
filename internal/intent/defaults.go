@@ -99,6 +99,8 @@ func ApplyDefaults(intent *Intent) {
 		applyNodeDefaults(&intent.Nodes[i])
 	}
 
+	applyMonitoringDefaults(intent.Monitoring)
+
 	if intent.Target.AutoPorts {
 		// Replace every port that's currently at its java-tron default with
 		// a free OS-assigned port. Errors here are non-fatal — leaving the
@@ -304,5 +306,24 @@ func applyNodeDefaults(node *NodeSpec) {
 	}
 	if node.JVM.GC == "" {
 		node.JVM.GC = "auto"
+	}
+}
+
+// applyMonitoringDefaults fills in default values for monitoring fields.
+func applyMonitoringDefaults(m *Monitoring) {
+	if m == nil {
+		return
+	}
+	if m.Enabled == nil {
+		m.Enabled = BoolPtr(false)
+	}
+	if m.Prometheus.Port == 0 {
+		m.Prometheus.Port = 9090
+	}
+	if m.Grafana.Port == 0 {
+		m.Grafana.Port = 3000
+	}
+	if m.Prometheus.Retention == "" {
+		m.Prometheus.Retention = "7d"
 	}
 }

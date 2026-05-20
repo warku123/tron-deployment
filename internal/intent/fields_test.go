@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -818,5 +819,166 @@ nodes:
 	}
 	if len(i.Nodes) != 3 {
 		t.Errorf("got %d nodes, want 3", len(i.Nodes))
+	}
+}
+
+// --- monitoring ---
+
+func TestMonitoring_ParsesAndDefaults(t *testing.T) {
+	yaml := []byte(`
+name: mon
+network: mainnet
+target: {type: local}
+monitoring:
+  enabled: true
+  prometheus:
+    port: 19090
+    retention: 14d
+  grafana:
+    port: 13000
+nodes:
+  - type: fullnode
+`)
+	i, err := Parse(yaml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i.Monitoring == nil || i.Monitoring.Enabled == nil || !*i.Monitoring.Enabled {
+		t.Fatal("monitoring not parsed")
+	}
+	if i.Monitoring.Prometheus.Port != 19090 {
+		t.Errorf("prometheus port = %d, want 19090", i.Monitoring.Prometheus.Port)
+	}
+	if i.Monitoring.Grafana.Port != 13000 {
+		t.Errorf("grafana port = %d, want 13000", i.Monitoring.Grafana.Port)
+	}
+	if i.Monitoring.Prometheus.Retention != "14d" {
+		t.Errorf("retention = %q, want 14d", i.Monitoring.Prometheus.Retention)
+	}
+}
+
+func TestMonitoring_DefaultsWhenOmitted(t *testing.T) {
+	i, err := Parse(makeIntent(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i.Monitoring != nil {
+		t.Errorf("monitoring should be nil when omitted, got %+v", i.Monitoring)
+	}
+}
+
+func TestMonitoring_DefaultsWhenEmpty(t *testing.T) {
+	yaml := []byte(`
+name: mon
+network: mainnet
+target: {type: local}
+monitoring:
+  enabled: true
+nodes:
+  - type: fullnode
+`)
+	i, err := Parse(yaml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i.Monitoring.Prometheus.Port != 9090 {
+		t.Errorf("prometheus port default = %d, want 9090", i.Monitoring.Prometheus.Port)
+	}
+	if i.Monitoring.Grafana.Port != 3000 {
+		t.Errorf("grafana port default = %d, want 3000", i.Monitoring.Grafana.Port)
+	}
+	if i.Monitoring.Prometheus.Retention != "7d" {
+		t.Errorf("retention default = %q, want 7d", i.Monitoring.Prometheus.Retention)
+	}
+}
+
+func TestMonitoring_InvalidPort(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{
+			"prometheus.port=80",
+			`name: mon
+network: mainnet
+target: {type: local}
+monitoring:
+  enabled: true
+  prometheus:
+    port: 80
+nodes:
+  - type: fullnode
+`,
+		},
+		{
+			"prometheus.port=70000",
+			`name: mon
+network: mainnet
+target: {type: local}
+monitoring:
+  enabled: true
+  prometheus:
+    port: 70000
+nodes:
+  - type: fullnode
+`,
+		},
+		{
+			"grafana.port=443",
+			`name: mon
+network: mainnet
+target: {type: local}
+monitoring:
+  enabled: true
+  grafana:
+    port: 443
+nodes:
+  - type: fullnode
+`,
+		},
+		{
+			"grafana.port=99999",
+			`name: mon
+network: mainnet
+target: {type: local}
+monitoring:
+  enabled: true
+  grafana:
+    port: 99999
+nodes:
+  - type: fullnode
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.yaml))
+			if err == nil {
+				t.Errorf("expected error for %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestMonitoring_InvalidRetention(t *testing.T) {
+	cases := []string{"7", "days", "1.5d", "week"}
+	for _, val := range cases {
+		t.Run("retention="+val, func(t *testing.T) {
+			yaml := fmt.Sprintf(`
+name: mon
+network: mainnet
+target: {type: local}
+monitoring:
+  enabled: true
+  prometheus:
+    retention: %s
+nodes:
+  - type: fullnode
+`, val)
+			_, err := Parse([]byte(yaml))
+			if err == nil {
+				t.Errorf("expected error for retention=%q", val)
+			}
+		})
 	}
 }
