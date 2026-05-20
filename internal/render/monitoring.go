@@ -184,10 +184,19 @@ func NormalizeDashboard(data []byte) []byte {
 			if list, ok := tlist["list"].([]any); ok {
 				for _, item := range list {
 					if im, ok := item.(map[string]any); ok {
-						if im["type"] == "datasource" {
+						switch im["type"] {
+						case "datasource":
 							im["current"] = map[string]any{
 								"text":    "prometheus",
 								"value":   "prometheus",
+								"selected": false,
+							}
+						case "query":
+							// Clear hardcoded defaults so Grafana picks the
+							// first available label value at render time.
+							im["current"] = map[string]any{
+								"text":    "",
+								"value":   "",
 								"selected": false,
 							}
 						}
