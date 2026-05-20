@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tronprotocol/tron-deployment/internal/output"
+	"github.com/tronprotocol/tron-deployment/internal/runtime"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 var (
@@ -44,6 +46,21 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer nc.Close()
+
+	// Remove monitoring stack if present (best-effort, before node removal).
+	if nc.Node.Monitoring != nil && nc.Node.Monitoring.Enabled {
+		// Determine where monitoring was deployed.
+		monTarget := nc.Target
+		if nc.Node.Monitoring.TargetType == "ssh" {
+			// Jar + SSH: monitoring ran on the trond machine.
+			monTarget = target.NewLocalTarget()
+		}
+		monRT := runtime.NewMonitoringRuntime(monTarget, deploymentsDir())
+		if err := monRT.Remove(cmd.Context(), name, true); err != nil {
+			// Non-fatal: log but continue with node removal.
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to remove monitoring stack: %v\n", err)
+		}
+	}
 
 	purge := !removeKeepData
 	if err := nc.Runtime.Remove(cmd.Context(), name, purge); err != nil {
