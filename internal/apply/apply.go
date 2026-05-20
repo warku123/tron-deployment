@@ -538,6 +538,7 @@ func deployMonitoring(ctx context.Context, opts Options, node *intent.NodeSpec, 
 		Name:    opts.Intent.Name,
 		Address: scrapeAddr,
 		Labels: map[string]string{
+			"group":    "group-tron",
 			"instance": opts.Intent.Name,
 			"network":  opts.Intent.Network,
 		},
