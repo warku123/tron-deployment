@@ -241,9 +241,13 @@ when `patches:` is non-empty:
 
 1. Validates each path: file exists, looks like a unified diff (catches the
    common mistake of pointing at a YAML or a JAR by accident).
-2. Computes `patch_hash = sha256(canonical concat of patch contents in
-   declared order)` — a **pure function of inputs**. Same intent + same
-   patches → same cache key on every machine.
+2. For each patch, records `(basename, sha256(file-contents))`. Computes
+   `patch_hash` as a deterministic fold of those per-patch SHA256s in
+   declared order — a **pure function of patch contents**. Same intent +
+   same patches → same cache key on every machine. The per-patch records
+   land in the build manifest so `trond build inspect <key>` surfaces a
+   portable fingerprint (basename + content sha256) rather than absolute
+   filesystem paths that drift when patches move.
 3. Opens a fresh `git worktree` at `$TROND_STATE_DIR/builds/worktrees/<cache-key>/`,
    checks out your `build.revision` (or HEAD) there, and `git apply`s the
    patches in declared order.
@@ -311,6 +315,26 @@ trond build inspect 260585c9397b-bd0861e68 -o json
 
 Returns the full manifest plus size + orphan state. On an ambiguous
 prefix you get a `AMBIGUOUS_PREFIX` error listing the candidates.
+
+For entries built with `build.patches`, the JSON output includes a
+`patches` array of `{name, sha256}` records:
+
+```jsonc
+{
+  "cache_key": "...",
+  "patches": [
+    {"name": "01-skip-tx-expiration.patch",
+     "sha256": "a1b2c3...8 chars... ...64 hex total"},
+    {"name": "02-skip-tapos-validation.patch",
+     "sha256": "..."}
+  ],
+  ...
+}
+```
+
+To verify your local patches still match this cached artifact (e.g.
+on a teammate's machine), compare the on-disk sha256 of each local
+patch file against the manifest's records — same content = same key.
 
 ### Prune
 

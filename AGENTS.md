@@ -449,10 +449,15 @@ build:
 
 Paths are intent-relative. When `patches:` is non-empty:
 
-- `patch_hash` becomes `sha256(ordered patch contents)` — a pure function
-  of inputs. Same intent + same patches → same `cache_key` on every
-  machine (no longer dependent on local working-tree state). This is the
-  ONLY way to get cross-machine cache reuse for non-vanilla builds.
+- `patch_hash` is a deterministic fold of per-patch SHA256s in declared
+  order — a pure function of patch CONTENTS (not paths). Same intent +
+  same patches → same `cache_key` on every machine (no longer dependent
+  on local working-tree state). This is the ONLY way to get cross-machine
+  cache reuse for non-vanilla builds.
+- The build manifest records `patches: [{name, sha256}, ...]` — basename
+  + content sha256, one entry per applied patch. `trond build inspect <key>`
+  surfaces these so an agent can verify a teammate's local patch files
+  match the cached artifact's inputs without depending on absolute paths.
 - Validation surfaces `INVALID_PATCH` (path missing / not a unified diff)
   or `PATCH_FAILED` (apply rejected) as structured errors with
   `exit_code: 2`. Agent should re-read the patch path or update

@@ -450,12 +450,16 @@ for max-iteration speed.
   (`*.patch`) to be applied to the resolved source revision before
   gradle runs. Path resolution mirrors FR-021 (intent-relative).
   When `patches` is non-empty:
-  - Cache key derivation MUST use `patch_hash = sha256(canonical
-    concat of patch file contents in declared order)` — a pure
-    function of inputs, NOT the working tree's `git diff`. This
-    guarantees two operators with the same intent and the same
-    patch files produce the same cache key regardless of their
-    local working tree state.
+  - Cache key derivation MUST use a `patch_hash` that is a pure
+    function of the (ordered) patch file contents, NOT the working
+    tree's `git diff`. Concrete formula (FR-026 impl): build a list
+    of per-patch records `[(basename, sha256(file-contents))]` in
+    declared order, then `patch_hash = sha256(canonical encoding
+    of the ordered sha256s, with index prefix + NUL separators)`.
+    The exact byte format is an implementation detail; the
+    invariant operators care about is: two operators with the same
+    intent and the same patch file CONTENTS produce the same cache
+    key regardless of their local working tree state.
   - The build MUST run in an isolated `git worktree` checked out at
     the resolved revision so patches apply against a known-clean
     tree. The worktree path is `${TROND_STATE_DIR}/builds/worktrees/
@@ -493,8 +497,17 @@ for max-iteration speed.
   patches: was set), builder_image_digest (which JDK image produced
   this), jdk_version, artifact_kind (jar|image), artifact_ref (path
   or image tag), sha256/image_id, duration_ms, builder (docker|host),
-  gradle_task, gradle_args, patches (list of paths, when present),
+  gradle_task, gradle_args, patches (list of `{name, sha256}` records
+  when build.patches was non-empty; see PatchRecord under Key Entities),
   created_at.
+- **PatchRecord**: Per-patch fingerprint persisted in the build
+  Manifest. Properties: name (basename of the patch file as declared
+  in intent.build.patches), sha256 (content hash of the patch file).
+  Stored rather than absolute paths so `trond build inspect` shows
+  portable identifiers — an operator inspecting a cache pulled from
+  a shared TROND_STATE_DIR can verify their local patch files match
+  the cached artifact's inputs via content sha256, without depending
+  on filesystem paths that may have moved.
 - **Source**: A reference to a java-tron checkout. Properties: path
   (canonicalized), revision_spec (HEAD|branch|tag|sha), resolved_revision,
   dirty_state (boolean), patch_hash (when dirty_state OR when
