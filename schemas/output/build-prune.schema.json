@@ -53,7 +53,17 @@
         "sha256":              { "type": "string" },
         "gradle_task":         { "type": "string" },
         "gradle_args":         { "type": "array", "items": { "type": "string" } },
-        "patches":             { "type": "array", "items": { "type": "string" } },
+        "patches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "sha256"],
+            "properties": {
+              "name":   { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        },
         "builder":             { "type": "string" },
         "platform":            { "type": "string" },
         "duration_ms":         { "type": "integer" },

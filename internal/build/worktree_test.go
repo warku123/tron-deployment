@@ -17,6 +17,9 @@ import (
 // machine / file path / surrounding state. Without this, two
 // operators with the same intent would NOT hit the same cache key,
 // defeating the whole point of declarative patches.
+//
+// Drives through buildPatchRecords + computePatchHashFromRecords —
+// the same two-step flow resolveBuild uses in production.
 func TestComputePatchHash_Deterministic(t *testing.T) {
 	d := t.TempDir()
 	mk := func(name, body string) string {
@@ -26,23 +29,25 @@ func TestComputePatchHash_Deterministic(t *testing.T) {
 		}
 		return p
 	}
+	hashOf := func(paths []string) string {
+		t.Helper()
+		recs, err := buildPatchRecords(paths)
+		if err != nil {
+			t.Fatalf("buildPatchRecords: %v", err)
+		}
+		return computePatchHashFromRecords(recs)
+	}
 	a1 := mk("a1.patch", "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@\n-old\n+new\n")
 	a2 := mk("a2.patch", "diff --git a/y b/y\n--- a/y\n+++ b/y\n@@\n-old\n+new\n")
 
-	h1, err := computePatchHash([]string{a1, a2})
-	if err != nil {
-		t.Fatalf("computePatchHash: %v", err)
-	}
-	h2, err := computePatchHash([]string{a1, a2})
-	if err != nil {
-		t.Fatal(err)
-	}
+	h1 := hashOf([]string{a1, a2})
+	h2 := hashOf([]string{a1, a2})
 	if h1 != h2 {
 		t.Errorf("hash drift on repeated call: %q vs %q", h1, h2)
 	}
 
 	t.Run("order matters", func(t *testing.T) {
-		swapped, _ := computePatchHash([]string{a2, a1})
+		swapped := hashOf([]string{a2, a1})
 		if swapped == h1 {
 			t.Error("hash must change when patches reorder (different application order can produce different end-state for adjacent hunks)")
 		}
@@ -51,10 +56,7 @@ func TestComputePatchHash_Deterministic(t *testing.T) {
 	t.Run("identical contents different filenames hash same", func(t *testing.T) {
 		copyA1 := mk("copy-of-a1.patch", "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@\n-old\n+new\n")
 		copyA2 := mk("copy-of-a2.patch", "diff --git a/y b/y\n--- a/y\n+++ b/y\n@@\n-old\n+new\n")
-		h3, err := computePatchHash([]string{copyA1, copyA2})
-		if err != nil {
-			t.Fatal(err)
-		}
+		h3 := hashOf([]string{copyA1, copyA2})
 		if h3 != h1 {
 			t.Errorf("identical patch contents should hash identically regardless of filename: %q vs %q",
 				h3, h1)
@@ -62,11 +64,45 @@ func TestComputePatchHash_Deterministic(t *testing.T) {
 	})
 
 	t.Run("empty list returns empty string", func(t *testing.T) {
-		h, err := computePatchHash(nil)
-		if err != nil || h != "" {
-			t.Errorf("empty patches → empty hash, no err; got (%q, %v)", h, err)
+		recs, err := buildPatchRecords(nil)
+		if err != nil || len(recs) != 0 {
+			t.Errorf("nil patches → empty records, no err; got (%v, %v)", recs, err)
+		}
+		if h := computePatchHashFromRecords(recs); h != "" {
+			t.Errorf("empty records → empty hash; got %q", h)
 		}
 	})
+}
+
+// TestBuildPatchRecords pins the Manifest-side fingerprint shape:
+// each record stores the basename + content sha256 so `trond build
+// inspect` shows portable identifiers even when the cache is pulled
+// from a shared TROND_STATE_DIR and the absolute paths no longer
+// exist on the inspecting machine.
+func TestBuildPatchRecords(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "sub", "01-skip-foo.patch")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "diff --git a/file b/file\n--- a/file\n+++ b/file\n@@\n-a\n+b\n"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	recs, err := buildPatchRecords([]string{p})
+	if err != nil {
+		t.Fatalf("buildPatchRecords: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("len(recs) = %d; want 1", len(recs))
+	}
+	if recs[0].Name != "01-skip-foo.patch" {
+		t.Errorf("Name = %q; want basename only (no nested path components)", recs[0].Name)
+	}
+	if len(recs[0].SHA256) != 64 {
+		t.Errorf("SHA256 length = %d; want 64 (full hex sha256)", len(recs[0].SHA256))
+	}
 }
 
 // TestValidatePatchFile pins FR-028's heuristic header check —
@@ -81,6 +117,18 @@ func TestValidatePatchFile(t *testing.T) {
 		return p
 	}
 
+	// Build a `git format-patch` style file whose `diff --git` line
+	// is past the prior 4 KB sniff window — review-pass-6 regression
+	// guard for the format-patch rejection bug.
+	longBody := strings.Repeat("Long commit message body line.\n", 200) // ~6 KB
+	formatPatch := "From abc1234567890abcdef1234567890abcdef1234 Mon Sep 17 00:00:00 2001\n" +
+		"From: Author <author@example.com>\n" +
+		"Date: Mon, 17 Sep 2001 00:00:00 -0000\n" +
+		"Subject: [PATCH] Example fix\n\n" +
+		longBody + "\n" +
+		"---\n file | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)\n\n" +
+		"diff --git a/file b/file\n--- a/file\n+++ b/file\n@@\n-a\n+b\n"
+
 	cases := []struct {
 		name      string
 		body      string
@@ -89,9 +137,11 @@ func TestValidatePatchFile(t *testing.T) {
 		{"git-format diff", "diff --git a/x b/x\n--- a/x\n+++ b/x\n", true},
 		{"posix patch format", "--- a/x.txt\t2024-01-01\n+++ b/x.txt\t2024-01-02\n@@\n", true},
 		{"svn-style Index header", "Index: foo/bar.java\n===================================================================\n--- a/foo/bar.java\n+++ b/foo/bar.java\n", true},
+		{"git format-patch with long body", formatPatch, true},
 		{"yaml masquerading as patch", "name: foo\nnetwork: mainnet\n", false},
 		{"random text", "hello world\n", false},
 		{"binary garbage", "\x00\x01\x02\x03", false},
+		{"From <not-a-sha>", "From this-isnt-a-sha Mon Sep ...\n", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -253,6 +303,61 @@ func TestResolveBuild_PatchesOverridesPatchHash(t *testing.T) {
 		t.Errorf("PatchHash/cache key drifted when unrelated WIP changed:\n  hash: %q vs %q\n  key:  %q vs %q\n"+
 			"(req.Patches MUST override the working-tree-derived hash so cache is cross-machine reusable)",
 			hash1, hash2, key1, key2)
+	}
+}
+
+// TestResolveBuild_PatchesProducesStableCacheKey is the review-pass-6
+// regression guard for the headline PR benefit: same intent + same
+// patch contents → same cache_key on every machine. Calls
+// resolveBuild twice with the SAME patches (different paths to
+// otherwise-identical files) and asserts the cache key matches.
+//
+// Without this, the cross-machine cache reuse story is unverified;
+// the existing TestResolveBuild_PatchesOverridesPatchHash only
+// proves dirty-tree noise doesn't shift the key, not that two
+// separate intents-with-patches converge.
+func TestResolveBuild_PatchesProducesStableCacheKey(t *testing.T) {
+	srcDir := initSmallRepo(t)
+	body := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-original\n+patched\n"
+
+	// Two separate copies of the same patch contents at different
+	// paths — models two operators with the same logical patch
+	// living in different filesystem locations.
+	d1, d2 := t.TempDir(), t.TempDir()
+	pA := filepath.Join(d1, "alice-checkout", "patches", "p.patch")
+	pB := filepath.Join(d2, "bobs-different-layout", "p.patch")
+	for _, p := range []string{pA, pB} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mk := func(patchPath string) string {
+		r, err := resolveBuild(context.Background(), Request{
+			SourcePath:           srcDir,
+			RevisionSpec:         "HEAD",
+			ArtifactKind:         "jar",
+			JDKVersion:           "8",
+			Builder:              "docker",
+			GradleTask:           "shadowJar",
+			Platform:             "linux/amd64",
+			Patches:              []string{patchPath},
+			BuilderImageOverride: "test-image@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		})
+		if err != nil {
+			t.Fatalf("resolveBuild: %v", err)
+		}
+		return r.cacheKeyStr
+	}
+
+	keyA := mk(pA)
+	keyB := mk(pB)
+	if keyA != keyB {
+		t.Errorf("identical patch contents at different paths must produce the SAME cache key\n  got %q vs %q\n  (cache reuse across operator machines is the headline benefit of declarative patches)",
+			keyA, keyB)
 	}
 }
 

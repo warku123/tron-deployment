@@ -15,15 +15,15 @@
     },
     {
       "name": "build-inspect",
-      "hash": "e6c9f91a4aef3e0c5e4a26f52045028e23a6376615370194f24c8e22233b30f1"
+      "hash": "b24c40bcaf5dbd18bdbd9b6e7f21745643a650f0885e130e6bff7edb08113606"
     },
     {
       "name": "build-list",
-      "hash": "b7480f2e72a4ef5ecc1b452793ba949d8f78aead2ea670af169202e0680c9411"
+      "hash": "909b9f6c141bd9b5d3285c2dc4693a9715c01a084780ccb07f252161f9418150"
     },
     {
       "name": "build-prune",
-      "hash": "c88bb4432d9ac1d0c38cc39ae73940110dc34ee424fd74520c2ab6be56f52dc1"
+      "hash": "8e4b54df2235f9175f28ec01eb75e003887714f40127e7150373d865f71125b2"
     },
     {
       "name": "config-diff",

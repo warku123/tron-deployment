@@ -13,41 +13,64 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/output"
 )
 
-// computePatchHash hashes the canonical concatenation of patch file
-// contents (in declared order) to a deterministic hex string.
-// Used as Source.PatchHash when build.patches is non-empty (FR-026)
-// so the cache key becomes a pure function of (revision + patches),
-// independent of the operator's local working tree.
+// buildPatchRecords reads each patch file once and returns a parallel
+// list of (Name, SHA256) records that downstream code uses for both:
 //
-// Two patches with the same byte content but different filenames
-// produce the SAME hash — only the contents matter, not the path.
-// Order does matter (different application order can produce
-// different end-state diffs for adjacent hunks), so the caller's
-// declared order is preserved.
+//   - the deterministic PatchHash that flows into the cache key
+//     (see computePatchHashFromRecords)
+//   - the Manifest.Patches list that `trond build inspect` exposes
+//     (so an operator can verify their local patch files still
+//     match the content sha256 that produced the cached artifact —
+//     independent of where on disk those files now live).
 //
-// Returns an error if any patch path is unreadable; FR-028 demands
-// path validation at intent-load time so this is mostly a
-// defense-in-depth check.
-func computePatchHash(paths []string) (string, error) {
+// One pass over each file is enough: the per-patch SHA256 is the
+// only fingerprint we ever need.
+func buildPatchRecords(paths []string) ([]PatchRecord, error) {
 	if len(paths) == 0 {
-		return "", nil
+		return nil, nil
 	}
-	h := sha256.New()
-	for i, p := range paths {
+	out := make([]PatchRecord, 0, len(paths))
+	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
-			return "", fmt.Errorf("read patch %s: %w", p, err)
+			return nil, fmt.Errorf("read patch %s: %w", p, err)
 		}
-		// NUL separator between patches so two adjacent patches
-		// `A` + `B` and the single patch `AB` (which could happen
-		// to byte-equal A||B in some edge case) yield different
-		// hashes. Also includes the index so reordering changes
-		// the hash even if file contents collide.
+		sum := sha256.Sum256(data)
+		out = append(out, PatchRecord{
+			Name:   filepath.Base(p),
+			SHA256: hex.EncodeToString(sum[:]),
+		})
+	}
+	return out, nil
+}
+
+// computePatchHashFromRecords folds an ordered list of PatchRecord
+// SHA256s into a single deterministic hex hash used as Source.PatchHash
+// when build.patches is non-empty (FR-026).
+//
+// Pure function of inputs. Two operators with the same patch file
+// contents in the same order get the same hash, regardless of the
+// patches' filesystem paths or surrounding working-tree state.
+//
+// Order matters (different application order can produce different
+// end-state diffs for adjacent hunks); identical contents under
+// different filenames hash identically (only sha256 participates).
+func computePatchHashFromRecords(records []PatchRecord) string {
+	if len(records) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	for i, r := range records {
+		// `patch <i>\x00<hex-sha256>\x00` per record. The index
+		// prefix forces reorderings into different hashes even
+		// when the sha256 set is unchanged; the trailing NUL
+		// terminates the variable-length sha so two adjacent
+		// records can't concatenate ambiguously.
 		fmt.Fprintf(h, "patch %d\x00", i)
-		h.Write(data)
+		h.Write([]byte(r.SHA256))
 		h.Write([]byte{0})
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // validatePatchFile checks that path exists, is a regular file, and
@@ -55,6 +78,16 @@ func computePatchHash(paths []string) (string, error) {
 // — we don't try to parse the full diff format; that's git apply's
 // job. The goal is to catch the common error of pointing the
 // patches: list at a non-patch file (a YAML, a JAR, a stray binary).
+//
+// Accepted formats (sufficient for `git apply` to consume):
+//   - `diff --git a/... b/...` (git diff / git diff HEAD output)
+//   - `--- ` / `+++ ` filename pair (POSIX unified diff)
+//   - `Index: <path>` header (svn / p4 / git apply tolerates this)
+//   - `From <40-hex-sha> Mon Sep ...` (git format-patch — mbox-style
+//     emails with the diff embedded after the body). The actual
+//     diff may be 30+ KB into the file if the commit message is
+//     long, so we use a 64 KB sniff window AND recognize the email
+//     prologue at byte 0.
 func validatePatchFile(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -63,19 +96,20 @@ func validatePatchFile(path string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("patch %s is not a regular file", path)
 	}
-	// Sniff the first 4 KB — enough to find a unified-diff header
-	// without slurping a multi-MB patch into memory just to validate.
+	// Sniff up to 64 KB. `git format-patch` files can have commit
+	// messages of arbitrary length before the diff body; 64 KB is
+	// enough to find `diff --git` past a multi-screen message
+	// without slurping a multi-MB patch entirely.
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("patch %s: %w", path, err)
 	}
 	defer f.Close()
-	buf := make([]byte, 4096)
+	buf := make([]byte, 64*1024)
 	n, _ := f.Read(buf)
 	head := string(buf[:n])
-	// Common unified-diff markers. `diff --git ` (git format) or
-	// the `--- ` / `+++ ` pair (POSIX patch format) or an `Index: `
-	// header (svn/p4 style — git apply accepts it).
+
+	// Standard unified-diff markers.
 	if strings.Contains(head, "diff --git ") ||
 		(strings.Contains(head, "\n--- ") && strings.Contains(head, "\n+++ ")) ||
 		strings.HasPrefix(head, "--- ") ||
@@ -83,9 +117,38 @@ func validatePatchFile(path string) error {
 		strings.HasPrefix(head, "Index: ") {
 		return nil
 	}
+	// `git format-patch` mbox prologue: starts with `From <40-hex-sha>`
+	// followed by mbox-style headers (Subject:, From:, Date:) and an
+	// optional long commit body before the diff. The presence of the
+	// `From <sha>` line at byte 0 is the canonical marker.
+	if isGitFormatPatchHeader(head) {
+		return nil
+	}
 	return fmt.Errorf("patch %s does not look like a unified diff "+
-		"(no `diff --git`, `--- ` / `+++ ` pair, or `Index:` header in the first 4 KB)",
+		"(no `diff --git`, `--- ` / `+++ ` pair, `Index:` header, or "+
+		"`From <sha>` git format-patch header in the first 64 KB)",
 		path)
+}
+
+// isGitFormatPatchHeader checks for the `From <40-hex-sha>` prologue
+// that `git format-patch` writes at byte 0. The standard layout is
+// `From abc123... Mon Sep 17 00:00:00 2001\n` followed by mbox headers.
+func isGitFormatPatchHeader(head string) bool {
+	if !strings.HasPrefix(head, "From ") {
+		return false
+	}
+	rest := head[5:]
+	// Need at least a 40-hex sha after "From ".
+	if len(rest) < 41 || rest[40] != ' ' {
+		return false
+	}
+	for i := range 40 {
+		c := rest[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // setupWorktree creates a per-cache-key git worktree at

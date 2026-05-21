@@ -112,6 +112,14 @@ type resolved struct {
 	// src.Path (the user-canonical source), not the trond-internal
 	// worktree path.
 	buildSourceDir string
+	// patchRecords are the (basename, sha256) records computed
+	// ONCE in resolveBuild and stored in the eventual Manifest. The
+	// Patches []string in req carries the absolute filesystem paths;
+	// patchRecords carries the portable fingerprints. Manifests
+	// store records (not paths) so `trond build inspect` doesn't
+	// expose stale-path footguns when patches are moved/renamed
+	// or the cache is pulled from a shared TROND_STATE_DIR.
+	patchRecords []PatchRecord
 }
 
 // Run executes (or cache-hits) a build for the given request. The
@@ -307,6 +315,7 @@ func resolveBuild(ctx context.Context, req Request) (*resolved, error) {
 	// `git diff` semantics for a pure function of inputs, so two
 	// operators with the same intent + same patch files produce
 	// the same cache key regardless of their working tree state.
+	var patchRecords []PatchRecord
 	if len(req.Patches) > 0 {
 		for _, p := range req.Patches {
 			if err := validatePatchFile(p); err != nil {
@@ -314,15 +323,22 @@ func resolveBuild(ctx context.Context, req Request) (*resolved, error) {
 					output.ExitValidationError, "%s", err.Error())
 			}
 		}
-		ph, err := computePatchHash(req.Patches)
+		// One pass: produce records (basename + content sha256).
+		// PatchHash folds these into the cache-key string; the
+		// records themselves land in the Manifest for `trond
+		// build inspect` traceability without exposing the
+		// absolute filesystem paths (which would mislead on
+		// cross-machine cache reuse).
+		recs, err := buildPatchRecords(req.Patches)
 		if err != nil {
 			return nil, output.NewErrorf("INVALID_PATCH",
-				output.ExitValidationError, "compute patch hash: %s", err.Error())
+				output.ExitValidationError, "compute patch records: %s", err.Error())
 		}
+		patchRecords = recs
 		// PatchHash gets folded into CacheKey below; DirtyState=true
 		// so the cache-key string emits the `+dirty-<patch8>` suffix
 		// just like the working-tree dirty path does.
-		src.PatchHash = ph
+		src.PatchHash = computePatchHashFromRecords(recs)
 		src.DirtyState = true
 	}
 
@@ -357,6 +373,7 @@ func resolveBuild(ctx context.Context, req Request) (*resolved, error) {
 		key:            key,
 		cacheKeyStr:    key.String(),
 		buildSourceDir: src.Path, // default; setupWorktree overrides when Patches set
+		patchRecords:   patchRecords,
 	}, nil
 }
 
@@ -422,7 +439,7 @@ func buildJAR(ctx context.Context, r *resolved, started time.Time) (*Manifest, e
 		SHA256:             sum,
 		GradleTask:         r.req.GradleTask,
 		GradleArgs:         r.req.GradleArgs,
-		Patches:            r.req.Patches,
+		Patches:            r.patchRecords,
 		Builder:            r.req.Builder,
 		Platform:           r.req.Platform,
 		DurationMs:         time.Since(started).Milliseconds(),
