@@ -85,9 +85,9 @@ func computePatchHashFromRecords(records []PatchRecord) string {
 //   - `Index: <path>` header (svn / p4 / git apply tolerates this)
 //   - `From <40-hex-sha> Mon Sep ...` (git format-patch — mbox-style
 //     emails with the diff embedded after the body). The actual
-//     diff may be 30+ KB into the file if the commit message is
-//     long, so we use a 64 KB sniff window AND recognize the email
-//     prologue at byte 0.
+//     diff may be tens of KB into the file if the commit message is
+//     long (release notes, signed-off-by chains), so we use a 256 KB
+//     sniff window AND recognize the email prologue at byte 0.
 func validatePatchFile(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {

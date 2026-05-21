@@ -242,17 +242,42 @@ type PruneOptions struct {
 }
 
 // PruneResult is the structured output the CLI/MCP layer renders.
-// Plan is what WOULD be removed; Removed is what was actually
-// removed (nil when DryRun). FreedBytes is the sum of SizeBytes for
-// successfully-removed entries (or, on DryRun, the sum over Plan).
+//
+// Two parallel surfaces:
+//
+//   - Plan / Removed (Entry-typed): manifest-backed cache entries.
+//     Entry's shape matches the on-disk Manifest + size/orphan
+//     decoration. Always tied to a build cache key with a manifest.
+//   - OrphanWorktrees (OrphanWorktree-typed): git-worktree dirs
+//     under `<cacheDir>/worktrees/` whose cache key has no live
+//     manifest. These come from SIGKILL between setupWorktree() and
+//     the deferred cleanup, process panics, etc. They have no
+//     manifest data (the manifest never persisted, or was already
+//     pruned), so we surface them through a distinct type rather
+//     than synthesizing fake Entry records that would violate
+//     build-prune.schema.json's `artifact_kind: enum [jar, image]`
+//     constraint. Keeping the two surfaces separated lets each
+//     evolve independently.
+//
+// FreedBytes is the GRAND total across BOTH surfaces — what the
+// disk actually got back (or, on DryRun, what it WOULD get back).
 // Schema contract: schemas/output/build-prune.schema.json describes
-// freed_bytes as "Total bytes reclaimed"; the post-loop recomputation
-// below honors that even when one entry's removal partially failed.
+// freed_bytes as "Total bytes reclaimed".
 type PruneResult struct {
-	Plan       []*Entry `json:"plan"`
-	Removed    []*Entry `json:"removed,omitempty"`
-	FreedBytes int64    `json:"freed_bytes"`
-	DryRun     bool     `json:"dry_run"`
+	Plan            []*Entry         `json:"plan"`
+	Removed         []*Entry         `json:"removed,omitempty"`
+	OrphanWorktrees []OrphanWorktree `json:"orphan_worktrees,omitempty"`
+	FreedBytes      int64            `json:"freed_bytes"`
+	DryRun          bool             `json:"dry_run"`
+}
+
+// OrphanWorktree is a per-entry record for a git-worktree dir
+// reclaimed (or, in dry-run, slated for reclaim) by Prune's GC
+// pass. Distinct from Entry because there's no Manifest — the
+// worktree's cache key isn't tied to any persisted build record.
+type OrphanWorktree struct {
+	CacheKey  string `json:"cache_key"`  // the directory name under <cacheDir>/worktrees/
+	SizeBytes int64  `json:"size_bytes"` // sum of file sizes under the worktree dir
 }
 
 // Prune evaluates the cache against opts, builds a deletion plan, and
@@ -287,11 +312,14 @@ func Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
 		DryRun: opts.DryRun,
 	}
 	if opts.DryRun {
-		// Dry-run reports what WOULD be freed — the plan's full
-		// size, since nothing is removed.
+		// Dry-run reports what WOULD be freed — manifests plus
+		// orphan worktrees discovered by the GC pass. The GC scan
+		// runs in inspect-only mode so operators see the full
+		// projected reclaim before committing.
 		for _, e := range plan {
 			result.FreedBytes += e.SizeBytes
 		}
+		gcOrphanWorktrees(ctx, all, result, true /* dryRun */)
 		return result, nil
 	}
 
@@ -358,16 +386,19 @@ func Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
 	// orphans — operators don't need to know about a second cleanup
 	// surface. The GC is best-effort: errors surface to stderr but
 	// don't fail the prune.
-	gcOrphanWorktrees(ctx, all, result)
+	gcOrphanWorktrees(ctx, all, result, false /* dryRun */)
 	return result, nil
 }
 
-// gcOrphanWorktrees walks $cacheDir/worktrees/ and removes dirs
-// whose cache-key basename doesn't match any current manifest and
-// isn't currently locked. The freed bytes are summed into
-// result.FreedBytes so the prune output is honest about ALL the
-// disk it reclaimed.
-func gcOrphanWorktrees(ctx context.Context, allEntries []*Entry, result *PruneResult) {
+// gcOrphanWorktrees walks $cacheDir/worktrees/ and populates
+// result.OrphanWorktrees with dirs whose cache-key basename doesn't
+// match any current manifest and isn't currently locked. When dryRun
+// is false, also removes them and credits their bytes to FreedBytes.
+//
+// Both branches respect the per-key flock — an in-flight build's
+// worktree is never touched even if its manifest hasn't been saved
+// yet (the build is mid-`gradle clean build`).
+func gcOrphanWorktrees(ctx context.Context, allEntries []*Entry, result *PruneResult, dryRun bool) {
 	worktreesDir := filepath.Join(CacheDir(), "worktrees")
 	dirents, err := os.ReadDir(worktreesDir)
 	if err != nil {
@@ -388,6 +419,7 @@ func gcOrphanWorktrees(ctx context.Context, allEntries []*Entry, result *PruneRe
 		validKeys[e.CacheKey] = true
 	}
 
+	var reclaimed int
 	for _, d := range dirents {
 		if err := ctx.Err(); err != nil {
 			return
@@ -412,6 +444,19 @@ func gcOrphanWorktrees(ctx context.Context, allEntries []*Entry, result *PruneRe
 		}
 		path := filepath.Join(worktreesDir, key)
 		size := dirSizeBytes(path)
+		// Record before we mutate so dry-run can populate the
+		// orphan list without doing the removal.
+		result.OrphanWorktrees = append(result.OrphanWorktrees, OrphanWorktree{
+			CacheKey:  key,
+			SizeBytes: size,
+		})
+
+		if dryRun {
+			result.FreedBytes += size // projected, not actual
+			release()
+			continue
+		}
+
 		// We don't know the user's source repo path here — the
 		// manifest that recorded it has already been pruned or
 		// never existed. Skip the proper `git worktree remove`
@@ -424,22 +469,27 @@ func gcOrphanWorktrees(ctx context.Context, allEntries []*Entry, result *PruneRe
 		if rmErr := os.RemoveAll(path); rmErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: worktree GC remove %s: %v\n", path, rmErr)
 			release()
+			// Roll back the record we added so the result reflects
+			// only what actually succeeded.
+			result.OrphanWorktrees = result.OrphanWorktrees[:len(result.OrphanWorktrees)-1]
 			continue
 		}
 		release()
-		// Synthesize a minimal Entry for the result envelope so
-		// operators see what was reclaimed. We mark it Orphaned and
-		// ArtifactKind="worktree" so JSON consumers can distinguish
-		// from real manifest removals.
-		result.Removed = append(result.Removed, &Entry{
-			Manifest: &Manifest{
-				CacheKey:     key,
-				ArtifactKind: "worktree",
-			},
-			SizeBytes: size,
-			Orphaned:  true,
-		})
 		result.FreedBytes += size
+		reclaimed++
+	}
+
+	// L-2: bookkeeping note for operators. When we drop a worktree
+	// dir via os.RemoveAll, the user's source repo still has a
+	// `.git/worktrees/<key>/` link that's now stale. git's own
+	// `git worktree prune` reclaims it cleanly. We don't run that
+	// (we don't know which source repo the worktree belonged to),
+	// but we tell the operator how to mop up if they care.
+	if reclaimed > 0 {
+		fmt.Fprintf(os.Stderr,
+			"info: reclaimed %d orphan worktree dir(s). To clean git's "+
+				"bookkeeping links: cd <your java-tron checkout> && git worktree prune\n",
+			reclaimed)
 	}
 }
 

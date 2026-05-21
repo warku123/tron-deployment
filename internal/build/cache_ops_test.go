@@ -522,25 +522,70 @@ func TestPrune_GCsOrphanWorktrees(t *testing.T) {
 		t.Errorf("live worktree at %s should NOT have been GC'd; stat err = %v", liveWorktreePath, statErr)
 	}
 
-	// Removed list should contain the orphan with ArtifactKind="worktree"
-	// so JSON consumers can distinguish it from a manifest removal.
+	// Orphan worktrees land in result.OrphanWorktrees, NOT
+	// result.Removed (Entry is reserved for manifest-tied entries
+	// so the wire shape matches build-prune.schema.json's
+	// `artifact_kind: enum [jar, image]` constraint).
 	var foundOrphan bool
-	for _, e := range res.Removed {
-		if e.CacheKey == orphanKey {
+	for _, w := range res.OrphanWorktrees {
+		if w.CacheKey == orphanKey {
 			foundOrphan = true
-			if e.ArtifactKind != "worktree" {
-				t.Errorf("orphan worktree's ArtifactKind = %q; want 'worktree' so the prune JSON disambiguates", e.ArtifactKind)
-			}
-			if !e.Orphaned {
-				t.Error("orphan worktree should be marked Orphaned=true in result")
-			}
-			if e.SizeBytes < 4096 {
-				t.Errorf("FreedBytes for orphan = %d; want >= 4096 (the planted file)", e.SizeBytes)
+			if w.SizeBytes < 4096 {
+				t.Errorf("OrphanWorktree.SizeBytes = %d; want >= 4096 (the planted file)", w.SizeBytes)
 			}
 		}
 	}
 	if !foundOrphan {
-		t.Errorf("orphan worktree not surfaced in result.Removed; got %d entries", len(res.Removed))
+		t.Errorf("orphan worktree not surfaced in result.OrphanWorktrees; got %d entries", len(res.OrphanWorktrees))
+	}
+
+	// FreedBytes should reflect the orphan's reclaimed bytes.
+	if res.FreedBytes < 4096 {
+		t.Errorf("FreedBytes = %d; want >= 4096 (orphan worktree reclaimed)", res.FreedBytes)
+	}
+}
+
+// TestPrune_DryRunSurfacesOrphanWorktrees pins M-1 from review pass 9:
+// dry-run reports an HONEST projection of what would be freed,
+// including orphan worktree dirs the GC pass would reclaim. Without
+// this, operators using --dry-run to size their cleanup get a
+// number smaller than the real --confirm run, surprising them.
+func TestPrune_DryRunSurfacesOrphanWorktrees(t *testing.T) {
+	withTempBaseDir(t)
+	if err := EnsureCacheDirs(); err != nil {
+		t.Fatal(err)
+	}
+	orphanKey := "dry-run-orphan"
+	orphanPath := filepath.Join(CacheDir(), "worktrees", orphanKey)
+	if err := os.MkdirAll(orphanPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphanPath, "stale.bin"),
+		make([]byte, 8192), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Prune(context.Background(), PruneOptions{All: true, DryRun: true})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	// Worktree must appear in the dry-run projection.
+	var listed bool
+	for _, w := range res.OrphanWorktrees {
+		if w.CacheKey == orphanKey {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Errorf("dry-run should list the orphan worktree; got %d entries", len(res.OrphanWorktrees))
+	}
+	if res.FreedBytes < 8192 {
+		t.Errorf("dry-run FreedBytes = %d; should include orphan's 8 KB", res.FreedBytes)
+	}
+	// But the dir MUST still be on disk after a dry-run.
+	if _, statErr := os.Stat(orphanPath); statErr != nil {
+		t.Errorf("dry-run removed the worktree; stat err = %v", statErr)
 	}
 }
 
