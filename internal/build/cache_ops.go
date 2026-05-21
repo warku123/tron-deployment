@@ -338,7 +338,126 @@ func Prune(ctx context.Context, opts PruneOptions) (*PruneResult, error) {
 		result.Removed = append(result.Removed, e)
 		result.FreedBytes += e.SizeBytes
 	}
+
+	// FR-026 follow-up: GC orphan git worktree directories under
+	// $cacheDir/worktrees/. A worktree is "orphan" when:
+	//   - Its name (basename of the dir) doesn't match any current
+	//     manifest's cache key, AND
+	//   - The cache-key lock isn't currently held (we use the same
+	//     TryAcquireCacheLock as the manifest loop, so an in-flight
+	//     build's worktree is never touched).
+	//
+	// Orphans are produced by:
+	//   - SIGKILL between setupWorktree() and the deferred cleanup.
+	//   - Process panics that skip defers (Go does NOT run defers on
+	//     fatal signals or runtime.Goexit-from-panic in some cases).
+	//   - Race conditions during git's own worktree bookkeeping.
+	//
+	// We always run this GC pass after the manifest loop so a single
+	// `trond build prune` reclaims both manifests AND worktree
+	// orphans — operators don't need to know about a second cleanup
+	// surface. The GC is best-effort: errors surface to stderr but
+	// don't fail the prune.
+	gcOrphanWorktrees(ctx, all, result)
 	return result, nil
+}
+
+// gcOrphanWorktrees walks $cacheDir/worktrees/ and removes dirs
+// whose cache-key basename doesn't match any current manifest and
+// isn't currently locked. The freed bytes are summed into
+// result.FreedBytes so the prune output is honest about ALL the
+// disk it reclaimed.
+func gcOrphanWorktrees(ctx context.Context, allEntries []*Entry, result *PruneResult) {
+	worktreesDir := filepath.Join(CacheDir(), "worktrees")
+	dirents, err := os.ReadDir(worktreesDir)
+	if err != nil {
+		// Missing dir is fine (no worktrees ever created); other
+		// errors are surfaced but don't abort the prune.
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "warning: worktree GC scan %s: %v\n",
+				worktreesDir, err)
+		}
+		return
+	}
+
+	// Build a set of currently-valid cache keys from the manifest
+	// list. A worktree whose name matches one of these is potentially
+	// in use by an active build → skip via the flock check.
+	validKeys := make(map[string]bool, len(allEntries))
+	for _, e := range allEntries {
+		validKeys[e.CacheKey] = true
+	}
+
+	for _, d := range dirents {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		if !d.IsDir() {
+			continue
+		}
+		key := d.Name()
+		// Don't GC a worktree whose key still has a live manifest —
+		// it might be in legitimate use. If the manifest gets pruned
+		// in this same Run, the next prune call cleans the
+		// now-orphan worktree.
+		if validKeys[key] {
+			continue
+		}
+		// Lock check: only GC if nobody else holds the key. A build
+		// in flight (between setupWorktree and Manifest.Save) is the
+		// realistic concurrent case here.
+		release, ok, lockErr := TryAcquireCacheLock(CacheDir(), key)
+		if lockErr != nil || !ok {
+			continue
+		}
+		path := filepath.Join(worktreesDir, key)
+		size := dirSizeBytes(path)
+		// We don't know the user's source repo path here — the
+		// manifest that recorded it has already been pruned or
+		// never existed. Skip the proper `git worktree remove`
+		// (which would clean the parent repo's
+		// .git/worktrees/<key>/ bookkeeping link) and just nuke
+		// the dir directly. Operators can reclaim the bookkeeping
+		// later via `git worktree prune` in their own source tree
+		// if it matters; the disk-space loss is the real concern
+		// and that's reclaimed here.
+		if rmErr := os.RemoveAll(path); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: worktree GC remove %s: %v\n", path, rmErr)
+			release()
+			continue
+		}
+		release()
+		// Synthesize a minimal Entry for the result envelope so
+		// operators see what was reclaimed. We mark it Orphaned and
+		// ArtifactKind="worktree" so JSON consumers can distinguish
+		// from real manifest removals.
+		result.Removed = append(result.Removed, &Entry{
+			Manifest: &Manifest{
+				CacheKey:     key,
+				ArtifactKind: "worktree",
+			},
+			SizeBytes: size,
+			Orphaned:  true,
+		})
+		result.FreedBytes += size
+	}
+}
+
+// dirSizeBytes returns the total disk footprint of a directory tree
+// (sum of regular-file sizes). Used to credit the prune result with
+// the bytes actually reclaimed by removing a worktree.
+func dirSizeBytes(path string) int64 {
+	var total int64
+	_ = filepath.WalkDir(path, func(_ string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }
 
 // selectForPrune is the policy engine. Pulled out for testability —

@@ -490,6 +490,16 @@ for max-iteration speed.
   - Validation errors surface as `INVALID_PATCH` with the path that
     failed validation, exit code 2.
 
+  Trust model: `build.patches` paths are intent-controlled and trond
+  reads them via `os.ReadFile` for validation + content hashing. An
+  intent author can therefore point `build.patches` at any file the
+  trond user can read (e.g., `/etc/passwd` for a sniff of the first
+  256 KB). This is the same trust level as `build.source` (which
+  trond `git`s against), `build.gradle_args` (which trond passes to
+  gradle), and `build.env` (allowlisted but still operator-supplied).
+  Intent files are considered trusted input; the threat model does
+  NOT defend against a malicious intent author.
+
 ### Key Entities
 
 - **Build**: A content-addressed compilation of a java-tron source tree.

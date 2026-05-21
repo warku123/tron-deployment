@@ -25,7 +25,14 @@ func EnsureCacheDirs() error {
 	// helpers). The runner now binds a docker named volume
 	// (`trond-build-gradle-cache`) instead, so this dir list is
 	// only for host-side outputs (artifacts, manifests, locks).
-	for _, sub := range []string{"out", "images", "manifest", "locks"} {
+	// `worktrees` holds per-cache-key git worktree dirs created by
+	// FR-026's `build.patches` path. Lifecycle is best-effort:
+	// setupWorktree creates `<cacheDir>/worktrees/<key>/`,
+	// removeWorktree tears it down after each build. SIGKILL between
+	// the two leaves an orphan dir; Prune's worktree GC pass
+	// reclaims those. Pre-creating the parent here means the first
+	// patches build doesn't race against the parent mkdir.
+	for _, sub := range []string{"out", "images", "manifest", "locks", "worktrees"} {
 		p := filepath.Join(CacheDir(), sub)
 		if err := os.MkdirAll(p, 0o700); err != nil {
 			return fmt.Errorf("mkdir %s: %w", p, err)

@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -371,6 +372,117 @@ func TestResolveBuild_PatchesProducesStableCacheKey(t *testing.T) {
 	}
 }
 
+// TestSetupWorktree_AgainstNonHeadRevision is the review-pass-8 M5
+// guard: patches MUST apply against the revision the user pinned in
+// build.revision, NOT against whatever HEAD happens to be. This is
+// the common case "I want to test patch X against the v4.7.7 tag"
+// — if the user moves HEAD forward and the surrounding code drifted,
+// the patch should still cleanly apply at the pinned older revision.
+//
+// Set-up: repo with two commits. Patches generated against the FIRST
+// commit's content. Worktree pinned to the first commit. Apply must
+// succeed even though HEAD has drifted to a different content shape.
+func TestSetupWorktree_AgainstNonHeadRevision(t *testing.T) {
+	withTempBaseDir(t)
+	if err := EnsureCacheDirs(); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := initSmallRepo(t) // initial: file.txt = "original\n"
+	firstRev := gitHEAD(t, srcDir)
+
+	// Drift HEAD: replace file.txt entirely so the patch (which
+	// matches the original content) would FAIL against current HEAD
+	// but SUCCEEDS against firstRev.
+	if err := os.WriteFile(filepath.Join(srcDir, "file.txt"),
+		[]byte("DRIFTED CONTENT — totally different\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitInRepo(t, srcDir, "add", "file.txt")
+	gitInRepo(t, srcDir, "commit", "-q", "-m", "drift HEAD")
+
+	// Patch matches the FIRST-commit content.
+	patch := writePatch(t, t.TempDir(), "p.patch", `diff --git a/file.txt b/file.txt
+--- a/file.txt
++++ b/file.txt
+@@ -1 +1 @@
+-original
++patched-at-pinned-revision
+`)
+
+	wt, cleanup, err := setupWorktree(context.Background(), srcDir, firstRev, "non-head-key", []string{patch})
+	if err != nil {
+		t.Fatalf("setupWorktree against pinned revision: %v "+
+			"(the worktree should checkout firstRev and apply the patch there, NOT against current HEAD)", err)
+	}
+	defer cleanup()
+
+	body, err := os.ReadFile(filepath.Join(wt, "file.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(body)) != "patched-at-pinned-revision" {
+		t.Errorf("worktree contents = %q; want patch applied against the pinned revision", string(body))
+	}
+}
+
+// TestSetupWorktree_BinaryPatch confirms a unified diff that includes
+// a binary-file hunk (git's `GIT binary patch` block) is accepted by
+// validatePatchFile + applies via git apply. Catches a regression
+// where the sniff heuristic rejects the binary-patch header style.
+func TestSetupWorktree_BinaryPatch(t *testing.T) {
+	withTempBaseDir(t)
+	if err := EnsureCacheDirs(); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := initSmallRepo(t)
+
+	// Add a binary file at HEAD so the patch has something to
+	// modify. Then craft a git-format binary patch that replaces
+	// its contents. Producing a real `GIT binary patch` block by
+	// hand is fiddly, so we use `git diff --binary` against a
+	// temporary mutation.
+	binPath := filepath.Join(srcDir, "data.bin")
+	if err := os.WriteFile(binPath, []byte{0x00, 0x01, 0x02, 0x03}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitInRepo(t, srcDir, "add", "data.bin")
+	gitInRepo(t, srcDir, "commit", "-q", "-m", "add binary")
+	rev := gitHEAD(t, srcDir)
+
+	// Mutate the binary then capture a binary diff.
+	if err := os.WriteFile(binPath, []byte{0xff, 0xfe, 0xfd, 0xfc, 0xfb}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	diffCmd := exec.Command("git", "-C", srcDir, "diff", "--binary", "HEAD", "--", "data.bin")
+	diffOut, err := diffCmd.Output()
+	if err != nil {
+		t.Fatalf("git diff --binary: %v", err)
+	}
+	gitInRepo(t, srcDir, "checkout", "--", "data.bin") // restore so worktree starts clean
+	patchPath := writePatch(t, t.TempDir(), "binary.patch", string(diffOut))
+
+	// Validation should accept the binary patch (sniff finds
+	// `diff --git`).
+	if err := validatePatchFile(patchPath); err != nil {
+		t.Fatalf("validatePatchFile rejected a git binary patch: %v", err)
+	}
+
+	// setupWorktree should also apply it cleanly.
+	wt, cleanup, err := setupWorktree(context.Background(), srcDir, rev, "binary-key", []string{patchPath})
+	if err != nil {
+		t.Fatalf("setupWorktree with binary patch: %v", err)
+	}
+	defer cleanup()
+	got, err := os.ReadFile(filepath.Join(wt, "data.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{0xff, 0xfe, 0xfd, 0xfc, 0xfb}
+	if !bytes.Equal(got, want) {
+		t.Errorf("worktree binary content = %x; want %x", got, want)
+	}
+}
+
 // --- helpers ---
 
 func initSmallRepo(t *testing.T) string {
@@ -393,6 +505,21 @@ func initSmallRepo(t *testing.T) string {
 	run("add", "file.txt")
 	run("commit", "-q", "-m", "initial")
 	return d
+}
+
+// gitInRepo runs `git <args>` inside dir, failing the test on error.
+// Mirrors initSmallRepo's pattern; pulled out so the new
+// non-HEAD-revision and binary-patch tests can drive git directly.
+func gitInRepo(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
 }
 
 func gitHEAD(t *testing.T, dir string) string {

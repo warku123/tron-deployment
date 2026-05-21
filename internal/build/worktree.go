@@ -96,16 +96,18 @@ func validatePatchFile(path string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("patch %s is not a regular file", path)
 	}
-	// Sniff up to 64 KB. `git format-patch` files can have commit
-	// messages of arbitrary length before the diff body; 64 KB is
-	// enough to find `diff --git` past a multi-screen message
-	// without slurping a multi-MB patch entirely.
+	// Sniff up to 256 KB. `git format-patch` files can have commit
+	// messages of arbitrary length before the diff body — release-
+	// note commits, signed-off-by chains, and conventional-commit
+	// "BREAKING CHANGE: ..." prose stack up. 64 KB was occasionally
+	// too small in practice; 256 KB is enough for any realistic
+	// commit message body without slurping a multi-MB patch entirely.
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("patch %s: %w", path, err)
 	}
 	defer f.Close()
-	buf := make([]byte, 64*1024)
+	buf := make([]byte, 256*1024)
 	n, _ := f.Read(buf)
 	head := string(buf[:n])
 
@@ -126,7 +128,7 @@ func validatePatchFile(path string) error {
 	}
 	return fmt.Errorf("patch %s does not look like a unified diff "+
 		"(no `diff --git`, `--- ` / `+++ ` pair, `Index:` header, or "+
-		"`From <sha>` git format-patch header in the first 64 KB)",
+		"`From <sha>` git format-patch header in the first 256 KB)",
 		path)
 }
 
@@ -144,7 +146,14 @@ func isGitFormatPatchHeader(head string) bool {
 	}
 	for i := range 40 {
 		c := rest[i]
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		// Accept both cases. `git format-patch` always emits
+		// lowercase, but a downstream tool (cosign attest, custom
+		// commit signers) may normalize to uppercase. Defensive
+		// — the check is just disambiguating from non-sha prologues
+		// like "From: Author Name <email>".
+		isLower := c >= '0' && c <= '9' || c >= 'a' && c <= 'f'
+		isUpper := c >= 'A' && c <= 'F'
+		if !isLower && !isUpper {
 			return false
 		}
 	}

@@ -469,6 +469,116 @@ func TestPrune_FreedBytesOnDryRunMatchesPlan(t *testing.T) {
 	}
 }
 
+// TestPrune_GCsOrphanWorktrees is the review-pass-8 H2 guard: a
+// worktree dir whose cache key has no live manifest AND no active
+// flock is an orphan (SIGKILL between setupWorktree and the
+// deferred cleanup; process panic; aborted ctrl-C between defer
+// registration and run). Prune MUST reclaim those — they're
+// 100-200 MB each for java-tron and never disappear on their own.
+func TestPrune_GCsOrphanWorktrees(t *testing.T) {
+	withTempBaseDir(t)
+	if err := EnsureCacheDirs(); err != nil {
+		t.Fatalf("EnsureCacheDirs: %v", err)
+	}
+
+	// Plant an orphan worktree dir with some content to measure
+	// FreedBytes against.
+	orphanKey := "orphan-key-no-manifest"
+	orphanPath := filepath.Join(CacheDir(), "worktrees", orphanKey)
+	if err := os.MkdirAll(orphanPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphanPath, "stale-data.bin"),
+		make([]byte, 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Also plant a non-orphan worktree (with a corresponding manifest)
+	// to confirm GC does NOT touch it.
+	live := seedJARManifest(t, "live-key", time.Now(), 100)
+	liveWorktreePath := filepath.Join(CacheDir(), "worktrees", live.CacheKey)
+	if err := os.MkdirAll(liveWorktreePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(liveWorktreePath, "in-use.bin"),
+		make([]byte, 2048), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Prune with a no-op policy (nothing to remove from manifests) —
+	// the GC pass still runs because it's unconditional.
+	res, err := Prune(context.Background(), PruneOptions{OrphanOnly: true})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	// Orphan must be gone.
+	if _, statErr := os.Stat(orphanPath); !os.IsNotExist(statErr) {
+		t.Errorf("orphan worktree at %s should be reclaimed; stat err = %v", orphanPath, statErr)
+	}
+	// Live worktree must be untouched (the live manifest's cache key
+	// is in the validKeys set, so its worktree skips the GC).
+	if _, statErr := os.Stat(liveWorktreePath); statErr != nil {
+		t.Errorf("live worktree at %s should NOT have been GC'd; stat err = %v", liveWorktreePath, statErr)
+	}
+
+	// Removed list should contain the orphan with ArtifactKind="worktree"
+	// so JSON consumers can distinguish it from a manifest removal.
+	var foundOrphan bool
+	for _, e := range res.Removed {
+		if e.CacheKey == orphanKey {
+			foundOrphan = true
+			if e.ArtifactKind != "worktree" {
+				t.Errorf("orphan worktree's ArtifactKind = %q; want 'worktree' so the prune JSON disambiguates", e.ArtifactKind)
+			}
+			if !e.Orphaned {
+				t.Error("orphan worktree should be marked Orphaned=true in result")
+			}
+			if e.SizeBytes < 4096 {
+				t.Errorf("FreedBytes for orphan = %d; want >= 4096 (the planted file)", e.SizeBytes)
+			}
+		}
+	}
+	if !foundOrphan {
+		t.Errorf("orphan worktree not surfaced in result.Removed; got %d entries", len(res.Removed))
+	}
+}
+
+// TestPrune_SkipsLockedOrphanWorktree pins the safety case: an
+// orphan worktree dir whose cache key flock is currently held
+// (representing a concurrent in-flight build) is NOT GC'd. Without
+// this, a slow worktree setup followed by a prune-in-parallel could
+// rip out the worktree dir mid-gradle-run.
+func TestPrune_SkipsLockedOrphanWorktree(t *testing.T) {
+	withTempBaseDir(t)
+	if err := EnsureCacheDirs(); err != nil {
+		t.Fatalf("EnsureCacheDirs: %v", err)
+	}
+
+	lockedKey := "locked-by-concurrent-build"
+	wtPath := filepath.Join(CacheDir(), "worktrees", lockedKey)
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Hold the flock for this key, simulating an active setupWorktree.
+	release, err := AcquireCacheLock(CacheDir(), lockedKey)
+	if err != nil {
+		t.Fatalf("test AcquireCacheLock: %v", err)
+	}
+	t.Cleanup(release)
+
+	// No live manifest for this key → it LOOKS like an orphan to the
+	// GC scan, but the flock check protects it.
+	_, err = Prune(context.Background(), PruneOptions{OrphanOnly: true})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if _, statErr := os.Stat(wtPath); statErr != nil {
+		t.Errorf("locked worktree at %s should NOT be GC'd; stat err = %v", wtPath, statErr)
+	}
+}
+
 // --- helpers ---
 
 func keys(entries []*Entry) []string {

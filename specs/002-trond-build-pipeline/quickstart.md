@@ -271,9 +271,15 @@ cd /path/to/java-tron
 # Make your changes; ./gradlew test as needed
 git diff > ~/my-feature.patch        # all changes
 git diff path/to/specific/File.java  # one file only
-# Then `git checkout -- .` to restore the working tree; trond will
-# re-apply the patch when it builds.
 ```
+
+> ⚠️ **Don't** run `git checkout -- .` to "restore" the source tree
+> after capturing the diff — that DESTROYS the working changes. The
+> patch file alone is enough; trond will re-apply it from a clean
+> `git worktree` at build time and your primary checkout's state
+> is irrelevant. If you want to keep iterating on the changes
+> locally, leave them in place; if you want a clean tree, use
+> `git stash` (recoverable) instead of `git checkout` (destructive).
 
 Then reference `~/my-feature.patch` from `build.patches`. trond uses
 `git apply --check` before mutation, so a patch that doesn't apply
