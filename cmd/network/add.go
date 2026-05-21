@@ -1,8 +1,10 @@
 package network
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -189,6 +191,9 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return output.NewError("STATE_ERROR", output.ExitGeneralError,
 			"failed to persist state: "+err.Error())
 	}
+
+	// Reload monitoring stack to include the new node if already deployed.
+	reloadNetworkMonitoring(cmd.Context(), addNetworkName, deployState, tgt)
 	writeAudit(auditEvent{
 		Command: "network-add",
 		Node:    nodeName,
@@ -207,4 +212,49 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	}
 	output.WriteJSON(os.Stdout, result)
 	return nil
+}
+
+// reloadNetworkMonitoring updates the Prometheus scrape config to include
+// a newly added node, then reloads Prometheus. Best-effort: failure is
+// silent (monitoring can be re-synced on next network create --monitor).
+func reloadNetworkMonitoring(ctx context.Context, networkName string, deployState *state.DeploymentState, tgt target.Target) {
+	prefix := networkName + "-node"
+	monDir := paths.Deployments()
+	monCompose := filepath.Join(monDir, networkName+"-monitoring", "docker-compose.yaml")
+
+	// Check if monitoring is deployed for this network.
+	if _, err := os.Stat(monCompose); err != nil {
+		return
+	}
+
+	// Collect all nodes in the network.
+	var targets []render.MonitoringTarget
+	for _, n := range deployState.Nodes {
+		if !strings.HasPrefix(n.Name, prefix) {
+			continue
+		}
+		targets = append(targets, render.MonitoringTarget{
+			Name:    n.Name,
+			Address: fmt.Sprintf("%s:9527", n.Name),
+			Labels: map[string]string{
+				"group":    "group-tron",
+				"instance": n.Name,
+				"network":  "private",
+			},
+		})
+	}
+	if len(targets) == 0 {
+		return
+	}
+
+	// Regenerate prometheus config.
+	// Use a default retention (7d) since we don't have access to the original intent.
+	promConfig := render.RenderPrometheusConfig(targets, "7d")
+	promPath := filepath.Join(monDir, networkName+"-monitoring", "conf", "prometheus.yml")
+	if err := tgt.WriteFile(ctx, promPath, []byte(promConfig), 0644); err != nil {
+		return
+	}
+
+	// Reload Prometheus via SIGHUP.
+	_, _ = tgt.Exec(ctx, "docker", "exec", networkName+"-prometheus", "kill", "-HUP", "1")
 }

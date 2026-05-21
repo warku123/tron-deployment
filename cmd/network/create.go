@@ -182,6 +182,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	// Deploy monitoring stack only when --monitor flag is explicitly passed.
 	if createMonitor {
+		if parsed.Monitoring == nil {
+			parsed.Monitoring = &intent.Monitoring{}
+		}
+		parsed.Monitoring.Enabled = intent.BoolPtr(true)
+		intent.ApplyMonitoringDefaults(parsed.Monitoring)
+
 		monResult := deployNetworkMonitoring(cmd.Context(), tgt, workDir, parsed)
 		if monResult.error != "" {
 			result["monitoring_error"] = monResult.error
