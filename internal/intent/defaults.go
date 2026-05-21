@@ -99,7 +99,7 @@ func ApplyDefaults(intent *Intent) {
 		applyNodeDefaults(&intent.Nodes[i])
 	}
 
-	applyMonitoringDefaults(intent.Monitoring)
+	ApplyMonitoringDefaults(intent.Monitoring)
 
 	if intent.Target.AutoPorts {
 		// Replace every port that's currently at its java-tron default with
@@ -309,8 +309,8 @@ func applyNodeDefaults(node *NodeSpec) {
 	}
 }
 
-// applyMonitoringDefaults fills in default values for monitoring fields.
-func applyMonitoringDefaults(m *Monitoring) {
+// ApplyMonitoringDefaults fills in default values for monitoring fields.
+func ApplyMonitoringDefaults(m *Monitoring) {
 	if m == nil {
 		return
 	}

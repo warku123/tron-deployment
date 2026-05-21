@@ -457,6 +457,19 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 		},
 		DurationMs: time.Since(start).Milliseconds(),
 		Build:      buildSummary,
+		MonitoringEndpoints: monitoringEndpointsFromExisting(opts.Existing),
+	}
+}
+
+// monitoringEndpointsFromExisting returns monitoring URLs from a managed
+// node's saved state, if monitoring was deployed for it.
+func monitoringEndpointsFromExisting(existing *state.ManagedNode) map[string]string {
+	if existing == nil || existing.Monitoring == nil || !existing.Monitoring.Enabled {
+		return nil
+	}
+	return map[string]string{
+		"prometheus_url": fmt.Sprintf("http://127.0.0.1:%d", existing.Monitoring.PrometheusPort),
+		"grafana_url":    fmt.Sprintf("http://127.0.0.1:%d", existing.Monitoring.GrafanaPort),
 	}
 }
 

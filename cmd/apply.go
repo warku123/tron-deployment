@@ -21,7 +21,6 @@ var (
 	applyWait        bool
 	applyWaitTimeout time.Duration
 	applyMonitor     bool
-	applyNoMonitor   bool
 )
 
 var applyCmd = &cobra.Command{
@@ -47,7 +46,7 @@ func init() {
 	applyCmd.Flags().BoolVar(&applyWait, "wait", false, "Block until the deployed node's HTTP API is reachable")
 	applyCmd.Flags().DurationVar(&applyWaitTimeout, "wait-timeout", 5*time.Minute, "Total wait budget when --wait is set")
 	applyCmd.Flags().BoolVar(&applyMonitor, "monitor", false, "Deploy monitoring stack (Prometheus + Grafana) alongside the node")
-	applyCmd.Flags().BoolVar(&applyNoMonitor, "no-monitor", false, "Skip monitoring stack deployment even if intent has monitoring.enabled=true")
+	mustMarkRequired(applyCmd, "intent")
 	mustMarkRequired(applyCmd, "intent")
 	rootCmd.AddCommand(applyCmd)
 }
@@ -62,22 +61,15 @@ func runApply(cmd *cobra.Command, args []string) error {
 			"Check intent file syntax", "Run: trond config validate "+applyIntentPath)
 	}
 
-	// Handle CLI monitoring overrides.
-	if cmd.Flags().Changed("monitor") && cmd.Flags().Changed("no-monitor") {
-		return exitWithError("VALIDATION_ERROR", output.ExitValidationError,
-			"cannot use both --monitor and --no-monitor",
-			"Use --monitor to force enable, --no-monitor to force disable, or neither to follow intent")
-	}
+	// Monitoring is opt-in: only deploy when --monitor is explicitly passed.
 	if cmd.Flags().Changed("monitor") {
 		if parsed.Monitoring == nil {
 			parsed.Monitoring = &intent.Monitoring{}
 		}
 		parsed.Monitoring.Enabled = intent.BoolPtr(true)
-	}
-	if cmd.Flags().Changed("no-monitor") {
-		if parsed.Monitoring == nil {
-			parsed.Monitoring = &intent.Monitoring{}
-		}
+		intent.ApplyMonitoringDefaults(parsed.Monitoring)
+	} else if parsed.Monitoring != nil && parsed.Monitoring.Enabled != nil && *parsed.Monitoring.Enabled {
+		// Intent says enabled=true, but no --monitor flag: disable.
 		parsed.Monitoring.Enabled = intent.BoolPtr(false)
 	}
 
@@ -163,6 +155,12 @@ func runApply(cmd *cobra.Command, args []string) error {
 	}
 	if res.Build != nil {
 		resultMap["build"] = res.Build
+	}
+	if res.MonitoringError != "" {
+		resultMap["monitoring_error"] = res.MonitoringError
+	}
+	if len(res.MonitoringEndpoints) > 0 {
+		resultMap["monitoring"] = res.MonitoringEndpoints
 	}
 
 	writeAudit(auditEvent{
