@@ -19,7 +19,10 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
-var createIntentPath string
+var (
+	createIntentPath string
+	createMonitor    bool
+)
 
 var createCmd = &cobra.Command{
 	Use:   "create",
@@ -30,6 +33,7 @@ var createCmd = &cobra.Command{
 
 func init() {
 	createCmd.Flags().StringVar(&createIntentPath, "intent", "", "Path to intent.yaml (required)")
+	createCmd.Flags().BoolVar(&createMonitor, "monitor", false, "Deploy Prometheus + Grafana monitoring stack for the network")
 	if err := createCmd.MarkFlagRequired("intent"); err != nil {
 		panic(err)
 	}
@@ -176,8 +180,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		"nodes":   deployed,
 	}
 
-	// Deploy monitoring stack if enabled (single stack for entire network).
-	if parsed.Monitoring != nil && parsed.Monitoring.Enabled != nil && *parsed.Monitoring.Enabled {
+	// Deploy monitoring stack only when --monitor flag is explicitly passed.
+	if createMonitor {
 		monResult := deployNetworkMonitoring(cmd.Context(), tgt, workDir, parsed)
 		if monResult.error != "" {
 			result["monitoring_error"] = monResult.error
