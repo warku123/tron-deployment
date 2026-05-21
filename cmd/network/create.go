@@ -47,6 +47,15 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
 	}
 
+	// Apply monitoring defaults early so RenderHOCON can inject metrics config.
+	if createMonitor {
+		if parsed.Monitoring == nil {
+			parsed.Monitoring = &intent.Monitoring{}
+		}
+		parsed.Monitoring.Enabled = intent.BoolPtr(true)
+		intent.ApplyMonitoringDefaults(parsed.Monitoring)
+	}
+
 	// Resolve target
 	var tgt target.Target
 	switch parsed.Target.Type {
