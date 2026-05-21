@@ -335,7 +335,7 @@ func TestResolveBuild_PatchesProducesStableCacheKey(t *testing.T) {
 		}
 	}
 
-	mk := func(patchPath string) string {
+	mk := func(patches []string) string {
 		r, err := resolveBuild(context.Background(), Request{
 			SourcePath:           srcDir,
 			RevisionSpec:         "HEAD",
@@ -344,7 +344,7 @@ func TestResolveBuild_PatchesProducesStableCacheKey(t *testing.T) {
 			Builder:              "docker",
 			GradleTask:           "shadowJar",
 			Platform:             "linux/amd64",
-			Patches:              []string{patchPath},
+			Patches:              patches,
 			BuilderImageOverride: "test-image@sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		})
 		if err != nil {
@@ -353,11 +353,21 @@ func TestResolveBuild_PatchesProducesStableCacheKey(t *testing.T) {
 		return r.cacheKeyStr
 	}
 
-	keyA := mk(pA)
-	keyB := mk(pB)
+	keyA := mk([]string{pA})
+	keyB := mk([]string{pB})
 	if keyA != keyB {
 		t.Errorf("identical patch contents at different paths must produce the SAME cache key\n  got %q vs %q\n  (cache reuse across operator machines is the headline benefit of declarative patches)",
 			keyA, keyB)
+	}
+
+	// Two-sided: patches MUST actually participate in the key, not
+	// be silently dropped. Without this assertion, the test above
+	// would pass trivially if a future refactor accidentally skipped
+	// the patches dimension of resolveBuild's cache key.
+	keyNoPatches := mk(nil)
+	if keyA == keyNoPatches {
+		t.Errorf("patches did not affect the cache key — silent drop?\n  with patches:    %q\n  without patches: %q",
+			keyA, keyNoPatches)
 	}
 }
 
