@@ -98,7 +98,7 @@ func (realHostRunner) RunBuild(ctx context.Context, r *resolved, outDir, outTmp 
 	// we'd fall back to whatever `gradle` the PATH gives — that's
 	// surprising and breaks the "version pinned by source" guarantee
 	// gradle wrappers provide.
-	gradlewPath := filepath.Join(r.src.Path, "gradlew")
+	gradlewPath := filepath.Join(r.buildSourceDir, "gradlew")
 	if _, err := os.Stat(gradlewPath); err != nil {
 		return fmt.Errorf("host builder requires %s; gradle wrapper not present "+
 			"(run 'gradle wrapper' in the source tree, or use --builder docker)",
@@ -122,7 +122,7 @@ func hostBuildJAR(ctx context.Context, r *resolved, _ /* outDir */, outTmp strin
 	if err := runGradleHost(ctx, r); err != nil {
 		return err
 	}
-	jarPath, err := findLargestFatJAR(r.src.Path)
+	jarPath, err := findLargestFatJAR(r.buildSourceDir)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func runGradleHost(ctx context.Context, r *resolved) error {
 	argv = append(argv, r.req.GradleArgs...)
 
 	cmd := exec.CommandContext(ctx, "./gradlew", argv...)
-	cmd.Dir = r.src.Path
+	cmd.Dir = r.buildSourceDir
 	// In `-o json` mode the CLI redirects stdout to a JSON buffer;
 	// gradle's chatter belongs on stderr regardless so it never
 	// corrupts the JSON envelope. Mirrors the docker runner's choice.

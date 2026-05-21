@@ -1,0 +1,20 @@
+diff --git a/chainbase/src/main/java/org/tron/core/capsule/TransactionCapsule.java b/chainbase/src/main/java/org/tron/core/capsule/TransactionCapsule.java
+index bb4b70cde..0efd51eed 100755
+--- a/chainbase/src/main/java/org/tron/core/capsule/TransactionCapsule.java
++++ b/chainbase/src/main/java/org/tron/core/capsule/TransactionCapsule.java
+@@ -886,11 +886,10 @@ public class TransactionCapsule implements ProtoCapsule<Transaction> {
+   }
+ 
+   public void checkExpiration(long nextSlotTime) throws TransactionExpirationException {
+-    if (getExpiration() < nextSlotTime) {
+-      throw new TransactionExpirationException(String.format(
+-          "Transaction expiration time is %d, but next slot time is %d",
+-          getExpiration(), nextSlotTime));
+-    }
++    // trond/replay: skip expiration check.
++    // Mainnet tx expiration is signed against mainnet time; private
++    // chain time will never line up. Covers Wallet, Manager, and
++    // TransactionsMsgHandler callers.
+   }
+ 
+   public boolean retCountIsGreatThanContractCount() {

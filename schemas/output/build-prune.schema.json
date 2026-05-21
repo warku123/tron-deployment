@@ -53,6 +53,7 @@
         "sha256":              { "type": "string" },
         "gradle_task":         { "type": "string" },
         "gradle_args":         { "type": "array", "items": { "type": "string" } },
+        "patches":             { "type": "array", "items": { "type": "string" } },
         "builder":             { "type": "string" },
         "platform":            { "type": "string" },
         "duration_ms":         { "type": "integer" },

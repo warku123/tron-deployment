@@ -1,0 +1,16 @@
+diff --git a/framework/src/main/java/org/tron/core/db/Manager.java b/framework/src/main/java/org/tron/core/db/Manager.java
+index a534b9d1c..d07c3a468 100644
+--- a/framework/src/main/java/org/tron/core/db/Manager.java
++++ b/framework/src/main/java/org/tron/core/db/Manager.java
+@@ -1518,8 +1518,9 @@ public class Manager {
+       trxCap.setInBlock(true);
+     }
+ 
+-    validateTapos(trxCap);
+-    validateCommon(trxCap);
++    // trond/replay: skip TaPos + expiration validation.
++    // validateTapos(trxCap);
++    // validateCommon(trxCap);
+ 
+     validateDup(trxCap);
+ 

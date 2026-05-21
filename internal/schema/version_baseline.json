@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.6.0",
+  "schema_version": "1.7.0",
   "entries": [
     {
       "name": "apply",
@@ -15,15 +15,15 @@
     },
     {
       "name": "build-inspect",
-      "hash": "e46f946583a6dc48b3b1eb1fc682abf5e3a41d5a39b458a981ac1108fa4fecb7"
+      "hash": "e6c9f91a4aef3e0c5e4a26f52045028e23a6376615370194f24c8e22233b30f1"
     },
     {
       "name": "build-list",
-      "hash": "607c0aefc821a0de901f413121b258a7d2ebf73a1ba7d3459aae6090c8c8d885"
+      "hash": "b7480f2e72a4ef5ecc1b452793ba949d8f78aead2ea670af169202e0680c9411"
     },
     {
       "name": "build-prune",
-      "hash": "24e46ba29d1c7089a089256a70c2e1f6b37a8bbeb38d25779b3990379a94406e"
+      "hash": "c88bb4432d9ac1d0c38cc39ae73940110dc34ee424fd74520c2ab6be56f52dc1"
     },
     {
       "name": "config-diff",

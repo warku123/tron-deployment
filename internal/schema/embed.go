@@ -53,7 +53,12 @@ import (
 //	        and intent `monitoring:` block; new `network-create`
 //	        `--monitor` flag; apply.output gains `monitoring_error`
 //	        and `monitoring` fields).
-const SchemaVersion = "1.6.0"
+//	1.7.0 — add `patches` optional field to build entry schemas
+//	        (build-list, build-inspect, build-prune) and to the
+//	        Manifest. Additive — old clients ignoring unknown
+//	        fields are unaffected. Drives FR-026 (declarative
+//	        source patches via build.patches).
+const SchemaVersion = "1.7.0"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

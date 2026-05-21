@@ -91,6 +91,20 @@ func resolveBuild(
 			output.ExitValidationError, "%s", srcErr.Error())
 	}
 
+	// Resolve patch paths intent-relative — mirror build.source's
+	// FR-021 semantics so the operator can put patches next to the
+	// intent file (or in a sibling repo like tron-deployment's
+	// tools/replay/patches/).
+	patches := make([]string, 0, len(bs.Patches))
+	for _, p := range bs.Patches {
+		resolved, perr := resolveBuildSource(p, opts.IntentPath)
+		if perr != nil {
+			return nil, "", "", output.NewErrorf("INVALID_PATCH",
+				output.ExitValidationError, "patch %q: %s", p, perr.Error())
+		}
+		patches = append(patches, resolved)
+	}
+
 	req := build.Request{
 		SourcePath:           source,
 		RevisionSpec:         bs.Revision,
@@ -104,6 +118,7 @@ func resolveBuild(
 		Env:                  bs.Env,
 		Platform:             bs.Platform,
 		ImageStrategy:        bs.ImageStrategy,
+		Patches:              patches,
 	}
 
 	res, runErr := build.Run(ctx, req)

@@ -241,6 +241,31 @@ type BuildSpec struct {
 	//     base. Works for stock java-tron — the source tree only
 	//     needs a JAR task (e.g. `:framework:buildFullNodeJar`).
 	ImageStrategy string `yaml:"image_strategy,omitempty" json:"image_strategy,omitempty" validate:"omitempty,oneof=gradle jar-wrap"`
+
+	// Patches is an optional ordered list of unified-diff files to
+	// apply against the resolved source revision before gradle runs
+	// (FR-026). Use cases: testing an unmerged upstream PR; backporting
+	// fixes; instrumentation for stress / replay testing; security or
+	// compliance variants not yet upstreamed.
+	//
+	// Path resolution: each entry is intent-relative (FR-021 mirror).
+	// `../tron-deployment/tools/replay/patches/01-skip-expiration.patch`
+	// from an intent at `~/projects/my-net/intent.yaml` resolves to
+	// `~/projects/my-net/../tron-deployment/tools/replay/patches/...`.
+	//
+	// Behavior when non-empty:
+	//   - Build runs in an isolated `git worktree` at the resolved
+	//     revision (your primary source tree is NEVER mutated).
+	//   - patch_hash = sha256(canonical concat of patch file contents
+	//     in declared order) — a pure function of inputs, NOT git diff
+	//     of the working tree. Same intent + same patches → same cache
+	//     key on every machine, no matter what local WIP edits the
+	//     operator has.
+	//
+	// When empty/absent: build pipeline behavior is unchanged from
+	// Phase 1-5. The build runs in the source tree directly; patch_hash
+	// follows the existing dirty-tree semantics (machine-local).
+	Patches []string `yaml:"patches,omitempty" json:"patches,omitempty" validate:"omitempty,dive,safe_string"`
 }
 
 // JarSource tells trond where (and how) to fetch the java-tron jar for a

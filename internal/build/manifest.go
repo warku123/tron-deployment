@@ -27,6 +27,7 @@ type Manifest struct {
 	SHA256             string    `json:"sha256,omitempty"`        // for jar
 	GradleTask         string    `json:"gradle_task"`
 	GradleArgs         []string  `json:"gradle_args,omitempty"`
+	Patches            []string  `json:"patches,omitempty"`  // FR-026; absolute paths declared in intent.build.patches
 	Builder            string    `json:"builder"`            // "docker" | "host"
 	Platform           string    `json:"platform,omitempty"` // "linux/amd64" | "linux/arm64"
 	DurationMs         int64     `json:"duration_ms"`

@@ -34,6 +34,7 @@
     "sha256":              { "type": "string" },
     "gradle_task":         { "type": "string" },
     "gradle_args":         { "type": "array", "items": { "type": "string" } },
+    "patches":             { "type": "array", "items": { "type": "string" }, "description": "Absolute paths of unified-diff files applied via git worktree before gradle ran (FR-026). Omitted when build.patches was empty." },
     "builder":             { "type": "string", "enum": ["docker","host"] },
     "platform":            { "type": "string" },
     "duration_ms":         { "type": "integer", "minimum": 0 },

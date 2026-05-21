@@ -445,17 +445,68 @@ for max-iteration speed.
   prune`). Default 7 days. Accepted: any Go `time.ParseDuration` value
   plus the literal `never`.
 
+- **FR-026**: The intent's `build:` block MUST accept an optional
+  `patches: []string` field listing paths to unified-diff files
+  (`*.patch`) to be applied to the resolved source revision before
+  gradle runs. Path resolution mirrors FR-021 (intent-relative).
+  When `patches` is non-empty:
+  - Cache key derivation MUST use `patch_hash = sha256(canonical
+    concat of patch file contents in declared order)` — a pure
+    function of inputs, NOT the working tree's `git diff`. This
+    guarantees two operators with the same intent and the same
+    patch files produce the same cache key regardless of their
+    local working tree state.
+  - The build MUST run in an isolated `git worktree` checked out at
+    the resolved revision so patches apply against a known-clean
+    tree. The worktree path is `${TROND_STATE_DIR}/builds/worktrees/
+    <cache-key>/`. It is created on cache miss and removed after
+    build (success or failure) — cache hits never touch the
+    worktree.
+  - Patches are applied via `git apply --check` (validation) then
+    `git apply` (mutation). A patch that fails to apply MUST surface
+    as a `PATCH_FAILED` structured error with the offending patch
+    path and `git apply`'s stderr, exit code 2.
+  - The user's primary source tree is NEVER mutated. Existing
+    iterative dev-loop behavior (run `trond build` against a dirty
+    working tree) is preserved when `patches` is absent.
+
+- **FR-027**: When `patches: []` is empty/absent, build pipeline
+  behavior is unchanged from FR-001..025: the build runs in the
+  user's source tree directly, `patch_hash` is computed from
+  `git diff` of the working tree (today's semantics, machine-local).
+  This preserves backward compatibility for every existing intent
+  file.
+
+- **FR-028**: Each patch file referenced by `build.patches` MUST be
+  validated at intent-load time:
+  - Path exists and is a regular file.
+  - File starts with a unified-diff header (`diff --git ` or
+    `--- ` / `+++ ` lines) to catch the common error of pointing at
+    a non-patch file.
+  - Validation errors surface as `INVALID_PATCH` with the path that
+    failed validation, exit code 2.
+
 ### Key Entities
 
 - **Build**: A content-addressed compilation of a java-tron source tree.
-  Properties: source_revision (git sha), patch_hash (if dirty),
-  builder_image_digest (which JDK image produced this), jdk_version,
-  artifact_kind (jar|image), artifact_ref (path or image tag),
-  sha256/image_id, duration_ms, builder (docker|host), gradle_task,
-  gradle_args, created_at.
+  Properties: source_revision (git sha), patch_hash (if dirty OR if
+  patches: was set), builder_image_digest (which JDK image produced
+  this), jdk_version, artifact_kind (jar|image), artifact_ref (path
+  or image tag), sha256/image_id, duration_ms, builder (docker|host),
+  gradle_task, gradle_args, patches (list of paths, when present),
+  created_at.
 - **Source**: A reference to a java-tron checkout. Properties: path
   (canonicalized), revision_spec (HEAD|branch|tag|sha), resolved_revision,
-  dirty_state (boolean), patch_hash (when dirty_state).
+  dirty_state (boolean), patch_hash (when dirty_state OR when
+  build.patches was declared — see FR-026).
+- **Worktree** (FR-026): A trond-managed `git worktree` at
+  `${TROND_STATE_DIR}/builds/worktrees/<cache-key>/`. Lifecycle:
+  created on cache miss when `build.patches` is non-empty, populated
+  with the resolved revision + applied patches, used as the gradle
+  source dir, removed after build completion (success OR failure).
+  Cache hits skip the worktree entirely. Git's object DB is shared
+  with the parent checkout, so each worktree's disk overhead is the
+  working tree only, not the full repo.
 - **Builder Image Pin**: A frozen mapping `jdk_version → image@sha256:...`
   bundled with each trond release. Refresh path: `make
   refresh-builder-pins`.
