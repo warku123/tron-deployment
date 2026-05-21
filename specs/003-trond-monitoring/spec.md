@@ -176,6 +176,14 @@ This enables `trond remove` to clean up the monitoring stack alongside the node.
 - **Modified schemas**: `intent.schema.json` (adds `monitoring:` block), `apply.schema.json` (adds `monitoring_error` and `monitoring` output fields)
 - **No breaking changes** to existing schemas
 
+## Known Limitations
+
+### Single Prometheus instance in multi-node networks
+
+The monitoring stack deploys exactly one Prometheus container for the entire network. Under normal operation this works well — all nodes are scraped via the shared docker network.
+
+Under `trond partition`, the Prometheus container lands in one partition group and loses visibility into nodes in other groups. Their metrics vanish from dashboards until `trond heal` restores connectivity. This is an inherent trade-off of the single-Prometheus deployment model: simplicity and resource efficiency over partition tolerance. Operators who need per-partition observability should run their own monitoring setup.
+
 ## Open Questions
 
 1. Should monitoring ports participate in `auto_ports` allocation? If prometheus 9090 is taken, should trond auto-pick 9091?
