@@ -182,7 +182,11 @@ This enables `trond remove` to clean up the monitoring stack alongside the node.
 
 The monitoring stack deploys exactly one Prometheus container for the entire network. Under normal operation this works well — all nodes are scraped via the shared docker network.
 
-Under `trond partition`, the Prometheus container lands in one partition group and loses visibility into nodes in other groups. Their metrics vanish from dashboards until `trond heal` restores connectivity. This is an inherent trade-off of the single-Prometheus deployment model: simplicity and resource efficiency over partition tolerance. Operators who need per-partition observability should run their own monitoring setup.
+Under `trond partition`, nodes in isolated groups are **detached from the shared docker network** (`trond-net4`). The single Prometheus container remains attached to the network, so it loses DNS resolution and scrape access to partitioned nodes entirely — their targets show as `down` in Prometheus and metrics vanish from dashboards. `trond heal` re-attaches the nodes to the docker network, after which Prometheus automatically resumes scraping (no manual reload required).
+
+This behavior was verified empirically: partitioning `net4-node0` from `net4-node1,net4-node2` caused the `net4-node0` target to go `down` within seconds; healing restored all three targets to `up`.
+
+This is an inherent trade-off of the single-Prometheus deployment model: simplicity and resource efficiency over partition tolerance. Operators who need per-partition observability during network splits should run their own monitoring setup.
 
 ## Open Questions
 

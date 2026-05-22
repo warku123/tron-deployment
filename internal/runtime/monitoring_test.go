@@ -32,7 +32,10 @@ func (f *fakeTarget) WriteFile(ctx context.Context, path string, data []byte, pe
 }
 func (f *fakeTarget) DiskFree(ctx context.Context, path string) (uint64, error) { return 0, nil }
 func (f *fakeTarget) MemTotal(ctx context.Context) (uint64, error) { return 0, nil }
+func (f *fakeTarget) PutFile(ctx context.Context, localPath, remotePath string) error { return nil }
+func (f *fakeTarget) Sha256IfExists(ctx context.Context, path string) (string, error) { return "", nil }
 func (f *fakeTarget) String() string { return "fake" }
+func (f *fakeTarget) CommandExists(ctx context.Context, name string) bool { return true }
 
 func TestMonitoringRuntime_Deploy(t *testing.T) {
 	ft := newFakeTarget()
