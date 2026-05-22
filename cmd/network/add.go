@@ -141,6 +141,15 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// If the network already has monitoring deployed, auto-enable metrics
+	// for the new node so Prometheus can scrape it.
+	monCompose := filepath.Join(paths.Deployments(), addNetworkName+"-monitoring", "docker-compose.yaml")
+	if _, err := os.Stat(monCompose); err == nil {
+		enabled := true
+		parsed.Monitoring = &intent.Monitoring{Enabled: &enabled}
+		intent.ApplyMonitoringDefaults(parsed.Monitoring)
+	}
+
 	templateDir := findTemplatesDir()
 	hocon, err := render.RenderHOCON(templateDir, parsed, node)
 	if err != nil {
@@ -247,10 +256,11 @@ func reloadNetworkMonitoring(ctx context.Context, networkName string, deployStat
 		return
 	}
 
-	// Regenerate prometheus config.
-	// Use a default retention (7d) since we don't have access to the original intent.
-	promConfig := render.RenderPrometheusConfig(targets, "7d")
+	// Regenerate prometheus config.  Retention is controlled by the
+	// docker-compose command args, not prometheus.yml, so we pass an
+	// empty string here — the existing compose file is left untouched.
 	promPath := filepath.Join(monDir, networkName+"-monitoring", "conf", "prometheus.yml")
+	promConfig := render.RenderPrometheusConfig(targets, "")
 	if err := tgt.WriteFile(ctx, promPath, []byte(promConfig), 0644); err != nil {
 		return
 	}
