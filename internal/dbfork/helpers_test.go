@@ -72,6 +72,14 @@ func compactAllStores(t *testing.T, dataDir string) {
 		for i := range 100 {
 			_ = ldb.Delete([]byte{byte(i)}, nil)
 		}
+		// Also drop the __seed__ key planted by seedLevelDBStore[Under].
+		// Without this, stores that Apply does NOT wipe (currently
+		// DynamicPropertiesStore in apply_test.go's end-to-end) carry
+		// __seed__ into the post-apply state. The equivalence test in
+		// Task #152 compares Go-mutated vs java-DbFork-mutated stores
+		// byte-for-byte, and the java tool's fixture won't have
+		// __seed__ — diverging here would mask real mutation bugs.
+		_ = ldb.Delete([]byte("__seed__"), nil)
 		if err := ldb.Close(); err != nil {
 			t.Fatalf("close %s: %v", e.Name(), err)
 		}

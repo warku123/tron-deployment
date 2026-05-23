@@ -81,10 +81,10 @@ type Result struct {
 	// TODO Task #149: TRC20SlotsUpdated int
 }
 
-// Apply opens the data dir, mutates the 8 stores per cfg, and
-// returns a Result. The engine handles + batches are managed
-// internally; callers don't see Engine / Batch types from the db
-// subpackage.
+// Apply opens the data dir, mutates the relevant subset of the 8
+// java-tron stores per cfg, and returns a Result. The engine handles
+// + batches are managed internally; callers don't see Engine / Batch
+// types from the db subpackage.
 //
 // Phase 1 PoC scope: witnesses + DynamicProperties (Task #147).
 // Accounts / TRC10 / TRC20 land in subsequent tasks and gain
@@ -111,9 +111,13 @@ func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
 	openStore := func(name string) (db.Engine, error) {
 		kind, kindErr := db.DetectKind(dataDir, name)
 		if kindErr != nil {
-			return nil, fmt.Errorf("detect kind for %s: %w", name, kindErr)
+			return nil, fmt.Errorf("dbfork: detect kind for %s: %w", name, kindErr)
 		}
-		return db.Open(dataDir, name, kind)
+		eng, openErr := db.Open(dataDir, name, kind)
+		if openErr != nil {
+			return nil, fmt.Errorf("dbfork: open %s: %w", name, openErr)
+		}
+		return eng, nil
 	}
 
 	// Enter the witness branch ONLY when fork.conf actually lists
