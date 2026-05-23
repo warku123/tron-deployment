@@ -119,6 +119,22 @@ func TestLevelDBEngine_RoundTrip(t *testing.T) {
 		// DB.Get on the other hand returns a freshly-allocated slice
 		// per goleveldb's godoc, so it doesn't need this protection
 		// and we removed the redundant copy there.
+		//
+		// The test must actually expose the hazard: if the wrapper
+		// DIDN'T copy, every retainedKeys[i] would alias the SAME
+		// internal buffer ending up at the last iteration's key, so
+		// retainedKeys[0] would byte-equal retainedKeys[N-1]. So we
+		// SEED two distinct keys here in this subtest (independent
+		// of what the earlier subtests left in the DB) so the
+		// first-vs-last check has guaranteed-distinct ground truth.
+		b := eng.NewBatch()
+		b.Put([]byte("iter-A"), []byte("alpha"))
+		b.Put([]byte("iter-Z"), []byte("omega"))
+		if err := b.Write(); err != nil {
+			t.Fatalf("seed for iterator test: %v", err)
+		}
+		b.Close()
+
 		it := eng.NewIterator()
 		defer it.Close()
 		var retainedKeys [][]byte
@@ -127,15 +143,30 @@ func TestLevelDBEngine_RoundTrip(t *testing.T) {
 			retainedKeys = append(retainedKeys, it.Key())
 			retainedVals = append(retainedVals, it.Value())
 		}
-		if len(retainedKeys) == 0 {
-			t.Fatal("expected at least one entry to iterate")
+		if len(retainedKeys) < 2 {
+			t.Fatal("expected at least 2 entries to differentiate buffers")
 		}
-		// After the loop completes, retained slices must still
-		// equal their on-disk values. If the wrapper's defensive
-		// copy were dropped, goleveldb would have reused its
-		// internal Key/Value buffer for each Next() and all
-		// retained slices would point at the same memory, ending
-		// up identical to the LAST entry's value.
+
+		// The actual buffer-reuse detector: first and last retained
+		// keys MUST differ. Under shared-buffer aliasing they'd be
+		// the same memory holding the last key.
+		first := retainedKeys[0]
+		last := retainedKeys[len(retainedKeys)-1]
+		if bytes.Equal(first, last) {
+			t.Errorf("retainedKeys[0]=%q == retainedKeys[%d]=%q — iterator buffer shared?",
+				first, len(retainedKeys)-1, last)
+		}
+		// Same check for values.
+		firstVal := retainedVals[0]
+		lastVal := retainedVals[len(retainedVals)-1]
+		if bytes.Equal(firstVal, lastVal) {
+			t.Errorf("retainedVals[0]=%q == retainedVals[%d]=%q — iterator buffer shared?",
+				firstVal, len(retainedVals)-1, lastVal)
+		}
+
+		// Sanity: every retained pair still resolves to itself
+		// via Get — catches the case where the wrapper copies but
+		// returns garbage bytes.
 		for i, k := range retainedKeys {
 			got, err := eng.Get(k)
 			if err != nil {
@@ -143,7 +174,7 @@ func TestLevelDBEngine_RoundTrip(t *testing.T) {
 				continue
 			}
 			if !bytes.Equal(got, retainedVals[i]) {
-				t.Errorf("retainedVals[%d] = %q; Get returned %q — iterator buffer reused?",
+				t.Errorf("retainedVals[%d] = %q; Get returned %q",
 					i, retainedVals[i], got)
 			}
 		}
