@@ -3,8 +3,9 @@ package dbfork
 import (
 	"testing"
 
-	pb "github.com/tronprotocol/tron-deployment/internal/dbfork/proto/pb"
 	"google.golang.org/protobuf/proto"
+
+	pb "github.com/tronprotocol/tron-deployment/internal/dbfork/proto/pb"
 )
 
 // TestProtoRoundTrip is the smoke gate for the proto pipeline: a
@@ -104,10 +105,10 @@ func TestProtoRoundTrip(t *testing.T) {
 		// offset when not user-supplied), then writes into the
 		// associated storageRowStore keyed by keccak(addr ‖ slot).
 		orig := &pb.SmartContract{
-			OriginAddress:   []byte{0x41, 0x11, 0x22},
-			ContractAddress: []byte{0x41, 0x33, 0x44},
-			Bytecode:        []byte{0x60, 0x80, 0x60, 0x40, 0x52}, // PUSH1 0x80 ...
-			Name:            "TestTRC20",
+			OriginAddress:              []byte{0x41, 0x11, 0x22},
+			ContractAddress:            []byte{0x41, 0x33, 0x44},
+			Bytecode:                   []byte{0x60, 0x80, 0x60, 0x40, 0x52}, // PUSH1 0x80 ...
+			Name:                       "TestTRC20",
 			ConsumeUserResourcePercent: 100,
 			OriginEnergyLimit:          10_000_000,
 		}

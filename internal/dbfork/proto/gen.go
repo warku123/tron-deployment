@@ -7,7 +7,7 @@
 //	             pinned GreatVoyage tag (e.g. GreatVoyage-v4.8.1).
 //	             Source-of-truth .proto files. Sync via subtree pull
 //	             when bumping java-tron compatibility — see README.md.
-//	pb/        — generated *.pb.go files. Commited to the repo so
+//	pb/        — generated *.pb.go files. Committed to the repo so
 //	             `go build` doesn't require protoc on every dev
 //	             machine. Regenerate via `go generate ./...` from
 //	             repo root after a subtree pull.
