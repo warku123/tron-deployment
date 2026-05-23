@@ -1,12 +1,17 @@
 // Package proto holds the protobuf bindings trond's dbfork engine
 // uses to read + write java-tron's on-disk capsule formats.
 //
+// Pinned upstream version: GreatVoyage-v4.8.1
+// (last subtree pull; bump this tag literal AND run `git subtree pull`
+// per proto/README.md together — keeping them in lockstep lets a
+// future reader grep the source instead of digging through git log.)
+//
 // Layout:
 //
-//	upstream/  — git subtree of github.com/tronprotocol/protocol at a
-//	             pinned GreatVoyage tag (e.g. GreatVoyage-v4.8.1).
-//	             Source-of-truth .proto files. Sync via subtree pull
-//	             when bumping java-tron compatibility — see README.md.
+//	upstream/  — git subtree of github.com/tronprotocol/protocol at the
+//	             pinned tag above. Source-of-truth .proto files. Sync
+//	             via subtree pull when bumping java-tron compatibility
+//	             — see README.md.
 //	pb/        — generated *.pb.go files. Committed to the repo so
 //	             `go build` doesn't require protoc on every dev
 //	             machine. Regenerate via `go generate ./...` from
@@ -26,6 +31,10 @@
 // Then from repo root:
 //
 //	go generate ./internal/dbfork/proto/...
+//
+// Platform: bash-only (Linux + macOS). Windows contributors regenerate
+// via WSL — gen-dbfork-protos.sh is a bash 3.2+ script and the
+// go-generate directive below invokes it via `bash -c`.
 //
 //go:generate bash -c "../../../scripts/gen-dbfork-protos.sh"
 package proto

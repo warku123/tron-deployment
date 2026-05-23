@@ -84,7 +84,10 @@ done
 
 # Ensure the output dir exists (otherwise protoc errors). Empty it
 # first so stale generated files from prior runs don't linger after
-# we drop a proto from the subset.
+# we drop a proto from the subset. The pb/ banner above + the
+# `// Code generated ... DO NOT EDIT.` header on every emitted .pb.go
+# is the contract: do NOT hand-edit pb/, this wipes them.
+echo "wiping $OUT (regenerating — never hand-edit *.pb.go)" >&2
 rm -rf "$OUT"
 mkdir -p "$OUT"
 

@@ -63,6 +63,13 @@ git add internal/dbfork/proto/upstream internal/dbfork/proto/pb
 git commit -m "dbfork: bump proto to GreatVoyage-v4.8.2"
 ```
 
+### When upstream drops a .proto we used to generate
+
+Remove the file path from `PROTO_FILES` in
+`scripts/gen-dbfork-protos.sh` and re-run `go generate`. The `pb/`
+dir is wiped + regenerated on every run, so stale `.pb.go` files are
+cleaned up automatically — no manual `git rm` needed.
+
 ### When upstream adds a new transitive import
 
 If `Tron.proto` (or one of our generated files) starts importing a
