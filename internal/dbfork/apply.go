@@ -76,5 +76,13 @@ var ErrNotImplemented = errors.New("dbfork: section not yet implemented in Phase
 // Today (skeleton): returns ErrNotImplemented. Each Task #147-#149
 // commit fills in a section.
 func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
+	// Args explicitly referenced so the unparam linter doesn't fire
+	// against the skeleton signature. Tasks #147-#149 wire each
+	// parameter into the real mutation flow; until then, the
+	// referenced-but-unused pattern documents the intended surface
+	// at call sites that already exist (cmd/shadowfork_mutate.go).
+	_ = dataDir
+	_ = cfg
+	_ = opts
 	return nil, ErrNotImplemented
 }

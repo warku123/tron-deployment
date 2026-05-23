@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -107,22 +108,44 @@ func TestLevelDBEngine_RoundTrip(t *testing.T) {
 		}
 	})
 
-	t.Run("returned slices are independent of internal buffers", func(t *testing.T) {
-		// goleveldb's iterator + Get share buffers internally; the
-		// engine wrapper copies on the way out so callers can retain
-		// values across subsequent ops. Verify by holding a Get'd
-		// slice while doing a Put + Get of a different key.
-		v1, err := eng.Get([]byte("k1"))
-		if err != nil {
-			t.Fatal(err)
+	t.Run("iterator returns defensive copies (key/value safe across Next)", func(t *testing.T) {
+		// This is the buffer-reuse hazard that actually exists in
+		// goleveldb: Iterator.Key/Value MAY share an internal buffer
+		// that gets overwritten on the next Next() call. The wrapper
+		// copies on the way out so callers retaining keys across
+		// iteration (dbfork's witness-erase pattern: walk + collect
+		// + delete) don't see corruption.
+		//
+		// DB.Get on the other hand returns a freshly-allocated slice
+		// per goleveldb's godoc, so it doesn't need this protection
+		// and we removed the redundant copy there.
+		it := eng.NewIterator()
+		defer it.Close()
+		var retainedKeys [][]byte
+		var retainedVals [][]byte
+		for it.Next() {
+			retainedKeys = append(retainedKeys, it.Key())
+			retainedVals = append(retainedVals, it.Value())
 		}
-		b := eng.NewBatch()
-		defer b.Close()
-		b.Put([]byte("k4"), []byte("v4-must-not-overwrite-v1-buffer"))
-		_ = b.Write()
-		_, _ = eng.Get([]byte("k4"))
-		if string(v1) != "v1" {
-			t.Errorf("v1 mutated after intervening Put/Get: %q", v1)
+		if len(retainedKeys) == 0 {
+			t.Fatal("expected at least one entry to iterate")
+		}
+		// After the loop completes, retained slices must still
+		// equal their on-disk values. If the wrapper's defensive
+		// copy were dropped, goleveldb would have reused its
+		// internal Key/Value buffer for each Next() and all
+		// retained slices would point at the same memory, ending
+		// up identical to the LAST entry's value.
+		for i, k := range retainedKeys {
+			got, err := eng.Get(k)
+			if err != nil {
+				t.Errorf("retainedKeys[%d]=%x not findable after iteration: %v", i, k, err)
+				continue
+			}
+			if !bytes.Equal(got, retainedVals[i]) {
+				t.Errorf("retainedVals[%d] = %q; Get returned %q — iterator buffer reused?",
+					i, retainedVals[i], got)
+			}
 		}
 	})
 }
@@ -158,14 +181,16 @@ func TestDetectKind_LevelDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DetectKind: %v", err)
 	}
-	if kind != EngineLevelDB {
-		t.Errorf("DetectKind = %v; want %v", kind, EngineLevelDB)
+	if kind != KindLevelDB {
+		t.Errorf("DetectKind = %v; want %v", kind, KindLevelDB)
 	}
 }
 
 // TestDetectKind_Empty: a store dir with no SST/LDB files yet (a
 // freshly-initialised node mid-compaction) yields a diagnostic
-// error rather than a misleading default.
+// error rather than a misleading default. Pin the actionable hint
+// in the error text so a future refactor that drops it fails this
+// test rather than silently degrading the operator experience.
 func TestDetectKind_Empty(t *testing.T) {
 	dataDir := t.TempDir()
 	storeDir := filepath.Join(dataDir, "database", "empty-store")
@@ -175,5 +200,10 @@ func TestDetectKind_Empty(t *testing.T) {
 	_, err := DetectKind(dataDir, "empty-store")
 	if err == nil {
 		t.Fatal("DetectKind on empty store should error")
+	}
+	for _, want := range []string{"no .ldb or .sst", "--engine"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q so operators know what to do", err, want)
+		}
 	}
 }

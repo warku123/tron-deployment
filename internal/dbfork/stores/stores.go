@@ -41,6 +41,11 @@ var AllStores = []string{
 }
 
 // Fixed byte keys inside DynamicPropertiesStore + WitnessScheduleStore.
+// Exposed as untyped string constants — the engine API takes []byte
+// but Go converts cleanly at the call site (`engine.Get([]byte(stores.
+// KeyLatestBlockHeaderTimestamp))`), and constants can't be mutated
+// by import-side code the way `var []byte` literals can.
+//
 // The byte literals come straight from java-tron — note the case
 // inconsistency between the config field name (camelCase) and the
 // on-disk key (mixed snake_case / SHOUTING). dbfork MUST emit the
@@ -52,18 +57,18 @@ var AllStores = []string{
 //	conf: latestBlockHeaderTimestamp  →  db key: latest_block_header_timestamp
 //	conf: maintenanceTimeInterval     →  db key: MAINTENANCE_TIME_INTERVAL
 //	conf: nextMaintenanceTime         →  db key: NEXT_MAINTENANCE_TIME
-var (
+const (
 	// DynamicPropertiesStore.
-	KeyLatestBlockHeaderTimestamp = []byte("latest_block_header_timestamp")
-	KeyLatestBlockHeaderNumber    = []byte("latest_block_header_number")
-	KeyMaintenanceTimeInterval    = []byte("MAINTENANCE_TIME_INTERVAL")
-	KeyNextMaintenanceTime        = []byte("NEXT_MAINTENANCE_TIME")
+	KeyLatestBlockHeaderTimestamp = "latest_block_header_timestamp"
+	KeyLatestBlockHeaderNumber    = "latest_block_header_number"
+	KeyMaintenanceTimeInterval    = "MAINTENANCE_TIME_INTERVAL"
+	KeyNextMaintenanceTime        = "NEXT_MAINTENANCE_TIME"
 
 	// WitnessScheduleStore. Holds the list of currently-active witnesses,
 	// 21 entries for mainnet at full schedule. Replaced wholesale on
 	// shadow fork (`witnessScheduleStore.put(ACTIVE_WITNESSES,
 	// concat(addr1, addr2, …))`).
-	KeyActiveWitnesses = []byte("active_witnesses")
+	KeyActiveWitnesses = "active_witnesses"
 )
 
 // Address length invariant. java-tron account addresses are

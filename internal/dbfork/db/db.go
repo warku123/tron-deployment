@@ -5,13 +5,25 @@
 //
 // Two implementations:
 //
-//   - leveldb.go      always-on (default build)
-//   - rocksdb.go      gated behind `//go:build rocksdb` (cgo, opt-in)
+//   - leveldb.go              always-on (default build, pure Go)
+//   - rocksdb_disabled.go     //go:build !rocksdb — friendly error
+//     ("rebuild with -tags rocksdb")
+//   - rocksdb_enabled.go      //go:build rocksdb — placeholder; real
+//     grocksdb wiring lands when a user
+//     needs it
 //
 // Build matrix:
 //
 //	go build ./...                  → LevelDB only, pure Go, single static binary
-//	go build -tags rocksdb ./...    → + RocksDB via cgo (grocksdb); needs librocksdb headers
+//	go build -tags rocksdb ./...    → + RocksDB via cgo (grocksdb)
+//
+// The rocksdb build needs librocksdb headers installed on the host:
+//
+//	macOS:           brew install rocksdb
+//	debian/ubuntu:   sudo apt install librocksdb-dev
+//
+// (without these, cgo errors out with "rocksdb/c.h: No such file
+// or directory" before linking.)
 //
 // The `Engine` interface keeps mutation code (witnesses.go,
 // accounts.go, …) backend-agnostic. Both engines expose the same

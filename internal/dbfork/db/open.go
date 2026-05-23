@@ -15,15 +15,15 @@ import (
 type EngineKind int
 
 const (
-	EngineLevelDB EngineKind = iota
-	EngineRocksDB
+	KindLevelDB EngineKind = iota
+	KindRocksDB
 )
 
 func (k EngineKind) String() string {
 	switch k {
-	case EngineLevelDB:
+	case KindLevelDB:
 		return "leveldb"
-	case EngineRocksDB:
+	case KindRocksDB:
 		return "rocksdb"
 	default:
 		return "unknown"
@@ -31,19 +31,21 @@ func (k EngineKind) String() string {
 }
 
 // DetectKind sniffs `<dataDir>/database/<storeName>/` to decide
-// which engine wrote it. Heuristic:
+// which engine wrote it. The heuristic is the SSTable file
+// extension — `.ldb` for LevelDB, `.sst` for RocksDB — both engines
+// share the auxiliary metadata file naming (CURRENT, MANIFEST-*,
+// LOG, etc.) so the extension is the only cheap discriminator
+// without parsing format magic bytes.
 //
-//   - `*.ldb` files OR `CURRENT` + `MANIFEST-*` (LevelDB format) →
-//     LevelDB.
-//   - `*.sst` files OR `OPTIONS-*` (RocksDB format) → RocksDB.
+// Limitations:
 //
-// LevelDB and RocksDB share enough metadata files (CURRENT, MANIFEST)
-// that we can't distinguish on those alone. The .ldb vs .sst extension
-// is the cleanest tie-breaker; both engines emit it for the same
-// reason (sorted string tables) but with different format magic.
-//
-// Returns an error if the store dir doesn't exist or neither engine
-// signature is found.
+//   - A freshly-initialised node before its first compaction has
+//     neither extension on disk yet. DetectKind errors with a
+//     "no .ldb or .sst" message — operators bypass with an explicit
+//     `--engine` flag at the CLI.
+//   - Mixed `.ldb` + `.sst` in the same dir suggests manual
+//     intervention or an aborted engine migration; DetectKind
+//     refuses to guess.
 func DetectKind(dataDir, storeName string) (EngineKind, error) {
 	path := filepath.Join(dataDir, "database", storeName)
 	dirents, err := os.ReadDir(path)
@@ -52,12 +54,9 @@ func DetectKind(dataDir, storeName string) (EngineKind, error) {
 	}
 	var hasLDB, hasSST bool
 	for _, d := range dirents {
-		name := d.Name()
-		if len(name) < 4 {
-			continue
-		}
-		ext := name[len(name)-4:]
-		switch ext {
+		// filepath.Ext returns "" for files without a dot, so the
+		// short-name check we used to do explicitly isn't needed.
+		switch filepath.Ext(d.Name()) {
 		case ".ldb":
 			hasLDB = true
 		case ".sst":
@@ -66,18 +65,13 @@ func DetectKind(dataDir, storeName string) (EngineKind, error) {
 	}
 	switch {
 	case hasLDB && !hasSST:
-		return EngineLevelDB, nil
+		return KindLevelDB, nil
 	case hasSST && !hasLDB:
-		return EngineRocksDB, nil
+		return KindRocksDB, nil
 	case hasLDB && hasSST:
 		return 0, fmt.Errorf("dbfork: mixed .ldb + .sst in %s — "+
 			"manual cleanup required, refusing to guess engine", path)
 	default:
-		// New / empty store, or a format we don't recognize. java-tron's
-		// initial sync writes manifests before any SST/LDB exists, so
-		// "no .ldb and no .sst" can be a freshly-started node. Default
-		// to LevelDB (java-tron's default `storage.db.engine`) but log
-		// it via the error message for diagnostic.
 		return 0, fmt.Errorf("dbfork: cannot detect engine for %s "+
 			"(no .ldb or .sst files); has the node finished initial "+
 			"DB compaction? Pass --engine to override", path)
@@ -89,9 +83,9 @@ func DetectKind(dataDir, storeName string) (EngineKind, error) {
 // DetectKind first.
 func Open(dataDir, storeName string, kind EngineKind) (Engine, error) {
 	switch kind {
-	case EngineLevelDB:
+	case KindLevelDB:
 		return OpenLevelDB(dataDir, storeName)
-	case EngineRocksDB:
+	case KindRocksDB:
 		return OpenRocksDB(dataDir, storeName)
 	default:
 		return nil, fmt.Errorf("dbfork: unknown engine kind %d", kind)

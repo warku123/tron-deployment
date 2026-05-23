@@ -9,7 +9,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // OpenLevelDB opens a java-tron LevelDB store at
@@ -17,11 +16,18 @@ import (
 // directly into the store dir (no `.ldb` subdir wrapper), so the
 // path is the same one a java-tron node would open.
 //
+// `ErrorIfMissing: true` is intentional: dbfork is a MUTATION tool
+// against an existing data dir. It must NEVER create a new store
+// implicitly — if the store is missing, that's a sign the operator
+// pointed us at the wrong directory and we should fail loud rather
+// than fork a fresh empty chain by accident.
+//
 // Returns an error if the store dir doesn't exist or the LevelDB
 // open fails (corrupt SST, lock contention with a running node,
 // etc.). dbfork's contract: the node MUST be stopped before mutate
-// runs — we don't enforce this with a lock-file check today because
-// java-tron's own LOCK file would prevent open anyway.
+// runs — we don't enforce this with a lock-file check because
+// java-tron's own LOCK file would prevent open anyway, surfacing as
+// "resource temporarily unavailable" from the line below.
 func OpenLevelDB(dataDir, storeName string) (Engine, error) {
 	path := filepath.Join(dataDir, "database", storeName)
 	if _, err := os.Stat(path); err != nil {
@@ -31,12 +37,7 @@ func OpenLevelDB(dataDir, storeName string) (Engine, error) {
 	// and Snappy for others; goleveldb auto-detects on read. We
 	// open in read-write mode because every dbfork store is going
 	// to be mutated.
-	db, err := leveldb.OpenFile(path, &opt.Options{
-		// java-tron's storage.db.engine writer wrote these — we
-		// match its block cache size for parity, but it's not
-		// load-bearing for correctness.
-		ErrorIfMissing: true,
-	})
+	db, err := leveldb.OpenFile(path, &opt.Options{ErrorIfMissing: true})
 	if err != nil {
 		return nil, fmt.Errorf("dbfork: open leveldb at %s: %w", path, err)
 	}
@@ -56,12 +57,13 @@ func (e *levelDBEngine) Get(key []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dbfork: get %s: %w", e.path, err)
 	}
-	// goleveldb returns a slice into its internal cache; we copy
-	// because dbfork's callers retain values across subsequent Get
-	// calls + the caller doesn't know about the internal sharing.
-	out := make([]byte, len(v))
-	copy(out, v)
-	return out, nil
+	// goleveldb's DB.Get already returns a freshly-allocated slice
+	// (per its godoc: "The returned slice is its own copy"), so we
+	// can hand it straight back. The defensive-copy contract still
+	// holds — it's just goleveldb that's doing the copy, not us.
+	// Iterator's Key/Value DO need a defensive copy though; see
+	// levelDBIterator below.
+	return v, nil
 }
 
 func (e *levelDBEngine) NewBatch() Batch {
@@ -69,9 +71,9 @@ func (e *levelDBEngine) NewBatch() Batch {
 }
 
 func (e *levelDBEngine) NewIterator() Iterator {
-	// nil Range means full-store iteration; nil ReadOptions uses
-	// default snapshot semantics (consistent point-in-time view).
-	return &levelDBIterator{it: e.db.NewIterator(&util.Range{}, nil)}
+	// nil Range = full-store iteration; nil ReadOptions = default
+	// snapshot semantics (consistent point-in-time view).
+	return &levelDBIterator{it: e.db.NewIterator(nil, nil)}
 }
 
 func (e *levelDBEngine) Close() error {
@@ -122,14 +124,19 @@ type levelDBIterator struct {
 
 func (i *levelDBIterator) Next() bool { return i.it.Next() }
 func (i *levelDBIterator) Key() []byte {
-	// Same copy concern as Get — return a defensive copy because
-	// goleveldb owns the underlying buffer for one Next() call only.
+	// Unlike DB.Get (which returns a freshly-allocated slice),
+	// goleveldb's iterator Key/Value MAY return slices into its
+	// internal buffer, valid only until the next Next()/Close().
+	// We defensively copy so callers can retain a key across
+	// further iteration — the standard pattern for dbfork's
+	// witness-erase path (collect all keys, then delete them).
 	k := i.it.Key()
 	out := make([]byte, len(k))
 	copy(out, k)
 	return out
 }
 func (i *levelDBIterator) Value() []byte {
+	// Same buffer-reuse hazard as Key — copy.
 	v := i.it.Value()
 	out := make([]byte, len(v))
 	copy(out, v)
