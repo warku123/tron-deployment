@@ -64,6 +64,14 @@ ALL_PROTOS=()
 while IFS= read -r line; do
     ALL_PROTOS+=("$line")
 done < <(cd "$UPSTREAM" && find . -name "*.proto" -type f | sed 's|^\./||' | sort)
+# Fail loud if upstream/ is empty (botched subtree, mid-rebase) —
+# without this guard, `${ALL_PROTOS[@]}` under `set -u` bash 3.2
+# would die with the confusing "unbound variable".
+if [ ${#ALL_PROTOS[@]} -eq 0 ]; then
+    echo "error: no .proto files found under $UPSTREAM" >&2
+    echo "       Did the git subtree pull at proto/README.md complete?" >&2
+    exit 1
+fi
 GO_OPTS=()
 for f in "${ALL_PROTOS[@]}"; do
     # M flag format: <proto-path>=<go-import>;<go-pkg-name>
