@@ -73,6 +73,58 @@ func TestProtoRoundTrip(t *testing.T) {
 		}
 	})
 
+	t.Run("AssetIssueContract", func(t *testing.T) {
+		// TRC10 metadata. The mutation engine reads the existing
+		// asset's AssetIssueContract (looking up by name → id) and
+		// rewrites the issuer's account_asset balance map.
+		orig := &pb.AssetIssueContract{
+			OwnerAddress: []byte{0x41, 0xaa, 0xbb, 0xcc},
+			Name:         []byte("USDT"),
+			Abbr:         []byte("USDT"),
+			TotalSupply:  100_000_000_000_000,
+			Precision:    6,
+			Id:           "1000001",
+		}
+		data, err := proto.Marshal(orig)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var back pb.AssetIssueContract
+		if err := proto.Unmarshal(data, &back); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if back.Id != "1000001" || back.TotalSupply != 100_000_000_000_000 || back.Precision != 6 {
+			t.Errorf("AssetIssueContract round-trip mismatch: %+v", &back)
+		}
+	})
+
+	t.Run("SmartContract", func(t *testing.T) {
+		// TRC20 entry point. dbfork's TRC20 path reads the SmartContract
+		// to locate the bytecode + abi (to learn the balances slot
+		// offset when not user-supplied), then writes into the
+		// associated storageRowStore keyed by keccak(addr ‖ slot).
+		orig := &pb.SmartContract{
+			OriginAddress:   []byte{0x41, 0x11, 0x22},
+			ContractAddress: []byte{0x41, 0x33, 0x44},
+			Bytecode:        []byte{0x60, 0x80, 0x60, 0x40, 0x52}, // PUSH1 0x80 ...
+			Name:            "TestTRC20",
+			ConsumeUserResourcePercent: 100,
+			OriginEnergyLimit:          10_000_000,
+		}
+		data, err := proto.Marshal(orig)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var back pb.SmartContract
+		if err := proto.Unmarshal(data, &back); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if string(back.ContractAddress) != string(orig.ContractAddress) ||
+			back.Name != "TestTRC20" || back.OriginEnergyLimit != 10_000_000 {
+			t.Errorf("SmartContract round-trip mismatch: %+v", &back)
+		}
+	})
+
 	t.Run("Permission with Keys slice", func(t *testing.T) {
 		// Permission is what owner_permission on Account uses — needed
 		// for the account-permission mutation path.

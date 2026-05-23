@@ -12,8 +12,11 @@ internal/dbfork/proto/
 │   │   ├── Tron.proto       # Account, Witness, Permission, Vote, AccountAsset
 │   │   └── ...
 │   └── api/                 # (unused — kept for forward extension)
-├── pb/                      # generated *.pb.go (committed)
-│   └── core/...
+├── pb/                      # generated *.pb.go (committed, FLAT)
+│   ├── Tron.pb.go
+│   ├── account.pb.go
+│   ├── smart_contract.pb.go
+│   └── ...                  # all in `package tronpb`, no subdirs
 ├── gen.go                   # `go generate` entry
 └── README.md
 ```
@@ -21,6 +24,12 @@ internal/dbfork/proto/
 `upstream/` is the unmodified protocol repo at a pinned tag. `pb/`
 holds the generated Go bindings — these are committed so `go build`
 works without protoc on every machine.
+
+All generated files land FLAT in `pb/` (no `core/` or `core/contract/`
+subdirs), declaring `package tronpb`. This is intentional — upstream
+.proto files cross-reference each other across directory boundaries
+(`Tron.proto` ↔ `core/contract/*.proto`), which only works inside a
+single Go package without Go import cycles.
 
 ## Pinned upstream version
 
@@ -53,6 +62,22 @@ go test ./internal/dbfork/ -run TestEquivalenceVsJavaDbFork
 git add internal/dbfork/proto/upstream internal/dbfork/proto/pb
 git commit -m "dbfork: bump proto to GreatVoyage-v4.8.2"
 ```
+
+### When upstream adds a new transitive import
+
+If `Tron.proto` (or one of our generated files) starts importing a
+.proto we don't yet list in `PROTO_FILES` (inside the gen script),
+`go build` will fail with:
+
+```
+undefined: tronpb.<NewTypeName>
+```
+
+Fix by adding the new .proto path to `PROTO_FILES` in
+`scripts/gen-dbfork-protos.sh` and re-running `go generate`. The
+M-flag catch-all in the script already maps EVERY .proto in
+upstream/ to our package, so we just need to tell protoc to emit
+the .pb.go for it.
 
 ## What we generate (and why this subset)
 

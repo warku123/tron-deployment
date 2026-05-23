@@ -11,9 +11,24 @@
 # =============================================================================
 set -euo pipefail
 
+# --- Toolchain prechecks (fail-loud) --------------------------------
+for bin in protoc protoc-gen-go; do
+    if ! command -v "$bin" >/dev/null 2>&1; then
+        echo "error: '$bin' not found on PATH." >&2
+        echo "       See internal/dbfork/proto/README.md for install instructions." >&2
+        exit 1
+    fi
+done
+
 cd "$(dirname "$0")/.."   # repo root
 UPSTREAM="internal/dbfork/proto/upstream"
 OUT="internal/dbfork/proto/pb"
+
+# --- WARNING: $OUT is wiped + regenerated on every run --------------
+# Do NOT hand-edit *.pb.go files; they're machine-generated and will
+# be clobbered. Both .pb.go and this dir are committed so `go build`
+# doesn't need protoc on every machine — to refresh, edit the upstream
+# .proto (via subtree pull, NOT directly) and re-run this script.
 
 # Subset we GENERATE Go bindings for. Add entries here as dbfork's
 # surface grows. Files transitively imported by these (but not in
@@ -41,7 +56,14 @@ GO_PACKAGE_PREFIX="github.com/tronprotocol/tron-deployment/internal/dbfork/proto
 # creates Go import cycles because the .proto messages cross those
 # boundaries freely (Tron.Account references contract messages and
 # vice versa). One Go package = no cycles, matches upstream design.
-mapfile -t ALL_PROTOS < <(cd "$UPSTREAM" && find . -name "*.proto" -type f | sed 's|^\./||' | sort)
+# Portable read-loop instead of `mapfile -t` (bash 4+ only — macOS
+# system bash is 3.2, so contributors invoking `bash scripts/...`
+# instead of `./scripts/...` would otherwise hit a confusing
+# "mapfile: command not found").
+ALL_PROTOS=()
+while IFS= read -r line; do
+    ALL_PROTOS+=("$line")
+done < <(cd "$UPSTREAM" && find . -name "*.proto" -type f | sed 's|^\./||' | sort)
 GO_OPTS=()
 for f in "${ALL_PROTOS[@]}"; do
     # M flag format: <proto-path>=<go-import>;<go-pkg-name>
