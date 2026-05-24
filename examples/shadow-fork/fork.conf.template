@@ -1,6 +1,6 @@
 # Shadow-fork PoC fork.conf TEMPLATE.
 #
-# Replace each <PLACEHOLDER> below with values produced by
+# Replace each placeholder below with values produced by
 # `scripts/poc-shadow-fork.sh setup` (which generates the witness
 # keypair and prints the address) OR by your own keygen tool of
 # choice (TronLink / tronweb / tronpy / wallet-cli).
