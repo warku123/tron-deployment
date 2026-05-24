@@ -1,0 +1,80 @@
+# Shadow-fork PoC trond intent TEMPLATE.
+#
+# Usage (after running scripts/poc-shadow-fork.sh setup + mutate):
+#
+#   SHADOW_FORK_WITNESS_KEY=<hex private key> \
+#     trond apply --intent examples/shadow-fork/intent.yaml
+#
+# The script's `apply` subcommand handles this automatically.
+#
+# This intent runs a single-witness shadow-fork node off a mutated
+# Nile snapshot. The data directory is bind-mounted from the host so
+# the java-tron container starts on the post-mutation state.
+name: shadow-fork-poc
+
+target:
+  type: local
+  runtime: docker
+
+# MUST be `nile` because the data dir is a Nile snapshot — java-tron
+# validates the genesis block against the network's HOCON
+# `genesis.block` at boot (Manager.initGenesis :619-622); a mismatch
+# crash-loops with `Genesis block modify, please delete database
+# directory and restart`. The `private` network has a different
+# genesis and would trigger this.
+#
+# Isolation from real Nile peers happens via config_overrides below:
+# empty seed list + node.p2p.version bump so any accidentally-
+# connected real Nile node treats us as a foreign chain version.
+network: nile
+
+nodes:
+  - type: witness
+    version: GreatVoyage-v4.8.1
+    witness_key:
+      # Resolves at deploy time to the env var the operator sets.
+      # The script generates this with the same private key used to
+      # derive the witness address pinned in fork.conf.
+      private_key_env: SHADOW_FORK_WITNESS_KEY
+
+    features:
+      jsonrpc: true
+      metrics: true
+
+    resources:
+      memory: 8GB
+
+    ports:
+      http: 8090
+      grpc: 50051
+      jsonrpc: 8545
+      p2p: 18888
+      metrics: 9527
+
+    # CRITICAL — point at the mutated snapshot dir. This is the
+    # output of `trond shadow-fork mutate -d <SHADOW_FORK_DATA_DIR>`.
+    # The script substitutes the absolute path; default is
+    # ./shadow-fork-data/output-directory under the repo root.
+    #
+    # The logs path is separate so the container's log volume
+    # doesn't get mixed into the snapshot.
+    storage:
+      data: <SHADOW_FORK_DATA_DIR>/output-directory
+      logs: <SHADOW_FORK_DATA_DIR>/logs
+
+    # Disable sync-check so the local witness can produce blocks
+    # without waiting for a peer to confirm sync — this is a
+    # structured intent field (maps to `block.needSyncCheck` per
+    # internal/intent/schema.go:287), not raw config_overrides.
+    network_overrides:
+      need_sync_check: false
+
+    # Isolate the shadow-fork chain from real Nile peers. We keep
+    # the Nile genesis (storage.data is a Nile snapshot) but bump
+    # the p2p version so a real Nile node treats us as foreign, and
+    # clear the seed list so we never reach out. These two are raw
+    # HOCON keys (no structured intent field) — config_overrides is
+    # the escape hatch.
+    config_overrides:
+      "seed.node.ip.list": []
+      "node.p2p.version": 99999
