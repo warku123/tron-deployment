@@ -50,7 +50,10 @@ type Config struct {
 	// merge into existing account, create stub if absent.
 	Accounts []AccountSpec
 
-	// TODO Task #149: TRC20Contracts []TRC20Spec
+	// Task #149 — TRC20 holding updates. Per-entry writes one
+	// EVM storage row (32-byte BE balance) under the keccak-derived
+	// slot key for the contract's `balances[account]` mapping.
+	TRC20Contracts []TRC20Spec
 }
 
 // Options configures the Apply call. RetainWitnesses mirrors java
@@ -89,7 +92,12 @@ type Result struct {
 	// the spec count, not the distinct-address count.
 	AccountsModified int `json:"accounts_modified"`
 
-	// TODO Task #149: TRC20SlotsUpdated int
+	// TRC20SlotsUpdated counts storage-row slots written.
+	// Mirrors java DbFork's `{n} TRC20 contracts have been modified`
+	// (DbFork.java:367-369). Specs that target a missing contract are
+	// silently skipped and do NOT increment this counter, matching
+	// java's per-iter cnt.getAndIncrement() inside the success path.
+	TRC20SlotsUpdated int `json:"trc20_slots_updated"`
 }
 
 // Apply opens the data dir, mutates the relevant subset of the 8
@@ -190,6 +198,28 @@ func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
 			return nil, err
 		}
 		res.AccountsModified = modified
+	}
+
+	// TRC20 contracts — only enter when fork.conf lists any. Two
+	// stores: contractStore (read-only, for SmartContract.version +
+	// trx_hash) and storageRowStore (one write per spec).
+	if len(cfg.TRC20Contracts) > 0 {
+		contractEng, err := openStore(stores.ContractStore)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = contractEng.Close() }()
+		storageRowEng, err := openStore(stores.StorageRowStore)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = storageRowEng.Close() }()
+		updated, err := MutateTRC20Contracts(contractEng, storageRowEng,
+			cfg.TRC20Contracts)
+		if err != nil {
+			return nil, err
+		}
+		res.TRC20SlotsUpdated = updated
 	}
 
 	// DynamicProperties — only touch if at least one field is non-zero.

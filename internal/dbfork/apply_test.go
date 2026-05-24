@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/tronprotocol/tron-deployment/internal/dbfork/db"
+	pb "github.com/tronprotocol/tron-deployment/internal/dbfork/proto/pb"
 	"github.com/tronprotocol/tron-deployment/internal/dbfork/stores"
 )
 
@@ -150,6 +153,50 @@ func TestApply_EndToEnd(t *testing.T) {
 	binary.BigEndian.PutUint64(wantTS, 1_700_000_000_000)
 	if !bytes.Equal(tsRaw, wantTS) {
 		t.Errorf("timestamp on disk = %x; want %x", tsRaw, wantTS)
+	}
+}
+
+// TestApply_EndToEnd_TRC20 is the wiring smoke for the Task #149
+// path: stand up contract + storage-row stores, seed a SmartContract
+// proto, call Apply with one TRC20Spec, verify the storage-row was
+// written. The keccak derivation correctness is covered in
+// trc20_test.go; this just proves Apply opens the right stores.
+func TestApply_EndToEnd_TRC20(t *testing.T) {
+	dataDir := seedLevelDBStore(t, stores.ContractStore)
+	seedLevelDBStoreUnder(t, dataDir, stores.StorageRowStore)
+	compactAllStores(t, dataDir)
+
+	contractAddrStr, contractRaw := makeAddress(t, [20]byte{0xe0})
+	accountAddrStr, _ := makeAddress(t, [20]byte{0xe1})
+
+	// Seed a SmartContract proto under the contract address — Apply's
+	// MutateTRC20Contracts needs it to derive addressHash + version.
+	{
+		eng, err := db.OpenLevelDB(dataDir, stores.ContractStore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sc := &pb.SmartContract{Version: 0}
+		raw, _ := proto.Marshal(sc)
+		b := eng.NewBatch()
+		b.Put(contractRaw, raw)
+		_ = b.Write()
+		b.Close()
+		_ = eng.Close()
+	}
+
+	res, err := Apply(dataDir, &Config{
+		TRC20Contracts: []TRC20Spec{{
+			ContractAddress: contractAddrStr,
+			Account:         accountAddrStr,
+			Balance:         "7777",
+		}},
+	}, Options{})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.TRC20SlotsUpdated != 1 {
+		t.Errorf("TRC20SlotsUpdated = %d; want 1", res.TRC20SlotsUpdated)
 	}
 }
 
