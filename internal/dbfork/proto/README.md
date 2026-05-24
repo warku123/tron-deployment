@@ -113,29 +113,30 @@ small and our dependency surface narrow.
 
 ## Tooling install
 
-Pin `protoc-gen-go` to **v1.36.11** — must match
-`google.golang.org/protobuf` in `go.mod`. Mismatched generator
-vs runtime versions produce cosmetically-different `.pb.go` output
-that fails the `proto-drift` CI job (`.github/workflows/ci.yml`)
-for the wrong reason. Task #157 will consolidate this pin into a
-single `tools.go` source of truth.
+`protoc-gen-go` is pinned via the Go 1.24+ `tool` directive in
+`go.mod` (single source of truth — kept automatically in step with
+`google.golang.org/protobuf` runtime version). `go install tool`
+reads that pin and installs into `$GOBIN`:
 
 ```bash
 # macOS
 brew install protobuf
-go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+go install tool
 
 # Linux (debian/ubuntu)
 sudo apt install protobuf-compiler
-go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+go install tool
 ```
 
-`$GOPATH/bin` must be on `$PATH` so protoc can find `protoc-gen-go`.
+`$GOPATH/bin` (or `$GOBIN`) must be on `$PATH` so protoc can find
+`protoc-gen-go`.
 
 After running `scripts/gen-dbfork-protos.sh`, `git diff
-internal/dbfork/proto/pb/` should be empty when your protoc-gen-go
-matches the pin. If you see a diff, your version is off — the CI
-gate uses v1.36.11 and will fail PRs that drift from it.
+internal/dbfork/proto/pb/` should be empty. If you see a diff, the
+`go install tool` step was skipped or your `$PATH` is picking up a
+different `protoc-gen-go` than the pinned one. The `proto-drift`
+CI job (`.github/workflows/ci.yml`) installs from the same pin, so
+any local-vs-CI mismatch points at your install, not the pin.
 
 ## Why protoc-gen-go and not gogo or buf?
 

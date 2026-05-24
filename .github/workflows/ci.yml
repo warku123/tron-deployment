@@ -93,12 +93,11 @@ jobs:
     #      tempt operators to "just tweak" — they're machine-
     #      generated and will be clobbered by the next regen).
     #
-    # protoc-gen-go version MUST match google.golang.org/protobuf
-    # in go.mod, otherwise CI-generated output diverges cosmetically
-    # from local-generated output and this check fails for the wrong
-    # reason. The version pin lives in two places (here + go.mod) —
-    # Task #157 (tools.go pin) consolidates them into a single source
-    # of truth.
+    # protoc-gen-go version is pinned via go.mod's `tool` directive
+    # (Go 1.24+ pattern). `go install tool` here installs ALL tools
+    # declared in go.mod — currently just protoc-gen-go @ the
+    # matching google.golang.org/protobuf runtime version. Single
+    # source of truth; mismatched generator vs runtime can't happen.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -110,8 +109,8 @@ jobs:
         with:
           version: "29.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install protoc-gen-go (pinned to runtime version)
-        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+      - name: Install pinned tools (protoc-gen-go via go.mod)
+        run: go install tool
       - name: Regenerate proto bindings
         run: bash scripts/gen-dbfork-protos.sh
       - name: Fail on drift

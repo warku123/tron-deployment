@@ -15,7 +15,11 @@ set -euo pipefail
 for bin in protoc protoc-gen-go; do
     if ! command -v "$bin" >/dev/null 2>&1; then
         echo "error: '$bin' not found on PATH." >&2
-        echo "       See internal/dbfork/proto/README.md for install instructions." >&2
+        if [ "$bin" = "protoc-gen-go" ]; then
+            echo "       Install the pinned version: go install tool" >&2
+            echo "       (Reads the version from go.mod's tool directive.)" >&2
+        fi
+        echo "       See internal/dbfork/proto/README.md for full instructions." >&2
         exit 1
     fi
 done
