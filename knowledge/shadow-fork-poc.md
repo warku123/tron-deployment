@@ -162,6 +162,34 @@ the same fork.conf via Go and Java, and diffs all 8 dbfork stores.
 A pass means the Go port and java DbFork produce byte-identical
 state from the same input.
 
+## Host architecture: amd64 required for the apply phase
+
+The `mutate` phase is architecture-portable (the dbfork engine is pure
+Go and reads/writes goleveldb on whatever the host CPU is). The `apply`
+phase, however, runs java-tron in a docker container and java-tron has
+a hard arm64 limitation:
+
+```
+WARN [db](Storage.java:180) Arm64 architecture detected, using RocksDB
+as db engine, ignore config.
+TronError: Cannot open LEVELDB database with ROCKSDB engine.
+```
+
+On arm64, java-tron auto-switches to the RocksDB engine regardless of
+`storage.db.engine` config. The standard Nile snapshot is LevelDB-format,
+so the container crash-loops with `Shutting down with code: ROCKSDB_INIT(1)`
+13+ times before docker gives up. Verified empirically on AWS Graviton2
+during the Phase 1 PoC test run.
+
+**For the `apply` phase, use an amd64 host.** mutate-only runs (proving
+the engine works against real data) are fine on arm64.
+
+A RocksDB-format Nile snapshot exists at
+`snapshots.nileex.io/rocksdb/backup<date>/FullNode_output-directory.tgz`
+but dbfork's RocksDB engine is currently a build-tagged stub (see
+internal/dbfork/db/rocksdb_enabled.go). Implementing it requires cgo +
+grocksdb and is out of Phase 1 scope.
+
 ## Phase 1 caveats
 
 - **Single witness, no finality**: the demo chain produces blocks
