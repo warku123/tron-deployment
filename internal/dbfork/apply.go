@@ -25,6 +25,8 @@ package dbfork
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/tronprotocol/tron-deployment/internal/dbfork/db"
 	"github.com/tronprotocol/tron-deployment/internal/dbfork/stores"
@@ -118,6 +120,21 @@ func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
 	}
 	if opts.DryRun {
 		return nil, errors.New("dbfork: --dry-run not yet implemented (Task #150)")
+	}
+
+	// Validate that <dataDir>/database/ exists before any branch
+	// gating decides whether to open a store. Without this check, an
+	// otherwise-empty fork.conf (only Properties.MaintenanceTimeInterval
+	// set, say, or fully empty) would silently report "0 modifications"
+	// against a bogus data dir — the gating logic would skip every
+	// section and return a zero Result with no I/O. The misleading
+	// success is the operator trap pass-2 review caught at the cmd
+	// layer; fixing it here means every caller (CLI, MCP, future
+	// programmatic use) is protected uniformly.
+	dbRoot := filepath.Join(dataDir, "database")
+	if _, err := os.Stat(dbRoot); err != nil {
+		return nil, fmt.Errorf("dbfork: data directory %s missing database/ subdir: %w",
+			dataDir, err)
 	}
 
 	res := &Result{}

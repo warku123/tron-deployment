@@ -3,6 +3,9 @@ package dbfork
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,14 +47,33 @@ func TestApply_GuardsAndNoOp(t *testing.T) {
 			t.Errorf("err = %v; should reference Task #150", err)
 		}
 	})
-	t.Run("empty config → no-op result", func(t *testing.T) {
-		// The proof that no engine is opened is implicit but solid:
-		// dataDir is "/nonexistent", so DetectKind would error with
-		// a "probe /nonexistent" message on any open attempt. A nil
-		// err here means Apply never tried to open a store — i.e.
-		// the short-circuit conditions on cfg.Witnesses /
-		// cfg.Properties chose to skip.
-		res, err := Apply("/nonexistent", &Config{}, Options{})
+	t.Run("missing data dir errors clearly", func(t *testing.T) {
+		// New defensive check: Apply validates <dataDir>/database
+		// exists before any section gating. Without this, an empty
+		// or properties-only config would silently report "0
+		// modifications" on a bogus dir (operator trap caught in
+		// pass-2 review of Task #153).
+		_, err := Apply("/nonexistent", &Config{}, Options{})
+		if err == nil {
+			t.Fatal("expected error for missing data directory")
+		}
+		if !strings.Contains(err.Error(), "data directory") {
+			t.Errorf("err = %v; should mention data directory", err)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("err = %v; should wrap os.ErrNotExist so the CLI "+
+				"can map to ExitValidationError", err)
+		}
+	})
+	t.Run("empty config + valid dir → no-op result", func(t *testing.T) {
+		// Pass the dataDir check by giving Apply a real (empty)
+		// database/ subdir, then verify the section gates short-
+		// circuit: zero counters with no errors.
+		dataDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dataDir, "database"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		res, err := Apply(dataDir, &Config{}, Options{})
 		if err != nil {
 			t.Fatalf("no-op apply: %v", err)
 		}
@@ -63,25 +85,26 @@ func TestApply_GuardsAndNoOp(t *testing.T) {
 	t.Run("properties-only config does not touch witness stores", func(t *testing.T) {
 		// Pins the principle-of-least-surprise contract: a fork.conf
 		// that only tunes timing must NOT wipe the witness store
-		// just because RetainWitnesses defaulted to false. If Apply
-		// erroneously entered the witness branch, the "/nonexistent"
-		// dataDir would surface as a DetectKind error here.
-		_, err := Apply("/nonexistent", &Config{
+		// just because RetainWitnesses defaulted to false. We give
+		// Apply a data dir with database/ but no store subdirs, so
+		// the properties branch's openStore surfaces a DetectKind
+		// error — the error must name the PROPERTIES store, proving
+		// the witness store was never opened.
+		dataDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dataDir, "database"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Apply(dataDir, &Config{
 			Properties: PropertiesSpec{MaintenanceTimeInterval: 60_000},
 		}, Options{}) // RetainWitnesses defaults to false — must still skip witnesses
-		// We expect an error from DetectKind on the properties store
-		// (since "/nonexistent" doesn't exist), but it must mention
-		// the PROPERTIES store, not the witness store.
 		if err == nil {
-			t.Fatal("expected DetectKind error on /nonexistent")
+			t.Fatal("expected DetectKind error on missing properties store")
 		}
 		if !strings.Contains(err.Error(), stores.DynamicPropertiesStore) {
-			t.Errorf("err = %v; want properties-store path, not witness",
-				err)
+			t.Errorf("err = %v; want properties-store path, not witness", err)
 		}
 		if strings.Contains(err.Error(), stores.WitnessStore) {
-			t.Errorf("err = %v; witness store should NOT have been opened",
-				err)
+			t.Errorf("err = %v; witness store should NOT have been opened", err)
 		}
 	})
 }

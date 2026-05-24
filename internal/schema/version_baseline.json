@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.4.0",
+  "schema_version": "1.5.0",
   "entries": [
     {
       "name": "apply",
@@ -92,6 +92,10 @@
     {
       "name": "recipe-show",
       "hash": "488d34dc919a5aa0f482656c34aa43c15b92c6acf5bd7105ebbe06877b303084"
+    },
+    {
+      "name": "shadow-fork-mutate",
+      "hash": "b7fdd61a475d8825ab4485b952dd6227b59551600c78755cb66e6b14582ad666"
     },
     {
       "name": "snapshot-download",

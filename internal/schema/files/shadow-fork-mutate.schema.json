@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tronprotocol/tron-deployment/blob/master/schemas/output/shadow-fork-mutate.schema.json",
+  "title": "trond shadow-fork mutate output",
+  "description": "Returned by `trond shadow-fork mutate ... -o json`. Counters mirror dbfork.Result and java DbFork's stdout summary lines.",
+  "type": "object",
+  "required": [
+    "data_dir",
+    "config",
+    "format",
+    "retain_witnesses",
+    "witnesses_written",
+    "active_witnesses",
+    "accounts_modified",
+    "trc20_slots_updated",
+    "properties_updated",
+    "duration_ms"
+  ],
+  "properties": {
+    "data_dir": {
+      "type": "string",
+      "description": "Path to the java-tron data directory the mutation was applied to (parent of database/)."
+    },
+    "config": {
+      "type": "string",
+      "description": "Path to the fork.conf that was applied."
+    },
+    "format": {
+      "type": "string",
+      "enum": ["auto", "hocon", "yaml"],
+      "description": "Format flag value as passed (auto / hocon / yaml). Reports the operator's input, NOT the resolved format — `auto` here means extension-detection was used; the resolved value is not surfaced through the CLI today."
+    },
+    "retain_witnesses": {
+      "type": "boolean",
+      "description": "Whether the existing witness store was preserved (true) or wiped-then-rewritten (false). Mirrors the --retain-witnesses flag."
+    },
+    "witnesses_written": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of Witness protos written to witnessStore. Equals len(cfg.Witnesses) on the happy path."
+    },
+    "active_witnesses": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 27,
+      "description": "Count of addresses in the new witnessScheduleStore active-witness slate. Capped at MaxActiveWitnessNum (27)."
+    },
+    "accounts_modified": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of fork.conf account specs processed. Matches java DbFork's `{n} accounts have been modified` stdout."
+    },
+    "trc20_slots_updated": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of storage-row slots written. Specs targeting a missing TRC20 contract are skipped silently and do NOT increment."
+    },
+    "properties_updated": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "description": "DynamicProperties keys modified (0..3: latestBlockHeaderTimestamp, maintenanceTimeInterval, nextMaintenanceTime)."
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wall-clock duration of Apply, in milliseconds."
+    }
+  },
+  "additionalProperties": false
+}
