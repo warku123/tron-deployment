@@ -62,6 +62,10 @@ func shadowforkMutateTool(_ context.Context, _ *mcp.CallToolRequest, args shadow
 	if err != nil {
 		return errResult(fmt.Errorf("load fork.conf: %w", err))
 	}
+	// Resolve format for the output report so MCP agents see the
+	// concrete value ("hocon" / "yaml") rather than the literal input.
+	// LoadConfig validated the extension already, so this can't fail.
+	resolvedFormat, _ := dbfork.ResolveFormat(args.ConfigPath, format)
 
 	start := time.Now()
 	res, err := dbfork.Apply(args.DataDir, cfg, dbfork.Options{
@@ -77,7 +81,7 @@ func shadowforkMutateTool(_ context.Context, _ *mcp.CallToolRequest, args shadow
 	return jsonResult(map[string]any{
 		"data_dir":            args.DataDir,
 		"config":              args.ConfigPath,
-		"format":              format.String(),
+		"format":              resolvedFormat.String(),
 		"retain_witnesses":    args.RetainWitnesses,
 		"witnesses_written":   res.WitnessesWritten,
 		"active_witnesses":    res.ActiveWitnessesSet,

@@ -83,6 +83,11 @@ func runMutate(cmd *cobra.Command, _ []string) error {
 		// and points at the offending field; pass through.
 		return output.NewError("CONFIG_LOAD_ERROR", output.ExitValidationError, err.Error())
 	}
+	// Resolve the format for the output report so JSON consumers see
+	// the concrete value ("hocon" / "yaml") rather than the operator's
+	// "auto" input. LoadConfig already validated the extension above,
+	// so ResolveFormat can't fail at this point in the flow.
+	resolvedFormat, _ := dbfork.ResolveFormat(mtConfigPath, format)
 
 	start := time.Now()
 	res, err := dbfork.Apply(mtDataDir, cfg, dbfork.Options{
@@ -105,7 +110,7 @@ func runMutate(cmd *cobra.Command, _ []string) error {
 		return output.WriteJSON(os.Stdout, map[string]any{
 			"data_dir":            mtDataDir,
 			"config":              mtConfigPath,
-			"format":              format.String(),
+			"format":              resolvedFormat.String(),
 			"retain_witnesses":    mtRetainWitnesses,
 			"witnesses_written":   res.WitnessesWritten,
 			"active_witnesses":    res.ActiveWitnessesSet,
@@ -118,7 +123,7 @@ func runMutate(cmd *cobra.Command, _ []string) error {
 
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "Shadow-fork mutation applied to %s (config: %s, %s):\n",
-		mtDataDir, mtConfigPath, format.String())
+		mtDataDir, mtConfigPath, resolvedFormat.String())
 	fmt.Fprintf(w, "  witnesses written:    %d\n", res.WitnessesWritten)
 	fmt.Fprintf(w, "  active witnesses:     %d\n", res.ActiveWitnessesSet)
 	fmt.Fprintf(w, "  accounts modified:    %d\n", res.AccountsModified)

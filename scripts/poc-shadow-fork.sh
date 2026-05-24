@@ -171,7 +171,13 @@ cmd_apply() {
   # shellcheck source=/dev/null
   source "$KEY_STASH"
   log "launching shadow-fork node from $INTENT"
-  "$TROND_BIN" apply --intent "$INTENT" --output json
+  # --auto-approve: setup regenerates the latestBlockHeaderTimestamp
+  # on each invocation, so the intent hash changes; without
+  # --auto-approve, the second run of `apply` would fail with
+  # HUMAN_REQUIRED (exit 10). --wait blocks until the container
+  # reports healthy so the next phase's observe step doesn't poll
+  # an unborn JSON-RPC endpoint.
+  "$TROND_BIN" apply --intent "$INTENT" --auto-approve --wait --output json
   log "apply done. Next: ./scripts/poc-shadow-fork.sh observe"
 }
 

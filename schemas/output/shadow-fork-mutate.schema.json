@@ -27,8 +27,8 @@
     },
     "format": {
       "type": "string",
-      "enum": ["auto", "hocon", "yaml"],
-      "description": "Format flag value as passed (auto / hocon / yaml). Reports the operator's input, NOT the resolved format — `auto` here means extension-detection was used; the resolved value is not surfaced through the CLI today."
+      "enum": ["hocon", "yaml"],
+      "description": "Resolved fork.conf format (`hocon` or `yaml`). When the operator passes `--format auto` (default), this reports the value detected from the file extension."
     },
     "retain_witnesses": {
       "type": "boolean",

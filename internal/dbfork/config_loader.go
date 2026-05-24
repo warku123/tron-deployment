@@ -52,13 +52,15 @@ func (f Format) String() string {
 //
 // Pass FormatHOCON or FormatYAML explicitly to override detection.
 //
-// HOCON include directives (`include "other.conf"`) are SUPPORTED by
-// the underlying parser (gurkankaymak/hocon). Includes resolve
-// relative to the directory of the file being loaded — equivalent to
-// java's Typesafe Config behavior. Operators sourcing fork.conf from
-// untrusted input should sanitize accordingly. LoadConfigBytes has
-// no file-system context, so includes there resolve relative to CWD
-// or fail; prefer LoadConfig for include-using configs.
+// HOCON include directives (`include "other.conf"`) are NOT officially
+// supported by trond. The underlying parser (gurkankaymak/hocon) honors
+// them, but trond loads the file via `os.ReadFile` + `ParseString`,
+// which discards the source directory — so includes resolve relative
+// to CWD (or fail), NOT relative to the file being loaded. For fork.conf
+// portability across machines, keep everything in a single self-contained
+// file. Operators sourcing fork.conf from untrusted input should
+// validate the file has no `include` keyword regardless, since the
+// parser would happily reach arbitrary CWD-relative paths.
 func LoadConfig(path string, format ...Format) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -86,6 +88,34 @@ func LoadConfig(path string, format ...Format) (*Config, error) {
 		}
 	}
 	return LoadConfigBytes(raw, chosen)
+}
+
+// ResolveFormat returns the concrete Format that LoadConfig would use
+// for the given path + format flag. When format is FormatAuto, this
+// looks at the file extension; when format is FormatHOCON or
+// FormatYAML, this returns it verbatim.
+//
+// Callers that need to surface the *resolved* format (e.g. the CLI's
+// JSON output reporting "yaml" instead of echoing the operator's
+// "auto") call this before LoadConfig; the format itself is cheap to
+// re-derive so there's no concern about a double-lookup. Returns an
+// error for unrecognized extensions when format is FormatAuto,
+// matching LoadConfig's gating.
+func ResolveFormat(path string, format Format) (Format, error) {
+	if format != FormatAuto {
+		return format, nil
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".yaml", ".yml":
+		return FormatYAML, nil
+	case ".conf", ".hocon", "":
+		return FormatHOCON, nil
+	default:
+		return FormatAuto, fmt.Errorf("dbfork: unrecognized fork.conf "+
+			"extension %q at %s (want .yaml/.yml/.conf/.hocon, or "+
+			"pass an explicit Format)", ext, path)
+	}
 }
 
 // LoadConfigBytes parses fork.conf content in the given format. format

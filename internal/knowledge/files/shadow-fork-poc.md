@@ -186,8 +186,9 @@ state from the same input.
 
 ## Where to go next
 
-- For programmatic / agent-driven workflows, see Task #160's
-  follow-up MCP tool + AGENTS.md recipe (in flight).
+- For programmatic / agent-driven workflows, see
+  AGENTS.md "Workflow 5 — Shadow-fork testing on a real
+  snapshot" and the `shadow_fork_mutate` MCP tool.
 - For multi-witness production-parity shadow forks, extend
   `examples/shadow-fork/fork.conf.template` with 27 witness
   entries + their keypairs, and add corresponding nodes to the
