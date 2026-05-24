@@ -152,3 +152,43 @@ func TestApply_EndToEnd(t *testing.T) {
 		t.Errorf("timestamp on disk = %x; want %x", tsRaw, wantTS)
 	}
 }
+
+// TestApply_EndToEnd_Accounts is the wiring smoke for the Task #148
+// path: stand up the 3 account-related stores, call Apply with one
+// AccountSpec, and verify Result counters + on-disk merge state.
+// The deeper merge/TRC10 semantics are exercised in accounts_test.go;
+// this just proves Apply routes correctly.
+func TestApply_EndToEnd_Accounts(t *testing.T) {
+	dataDir := seedLevelDBStore(t, stores.AccountStore)
+	seedLevelDBStoreUnder(t, dataDir, stores.AccountAssetStore)
+	seedLevelDBStoreUnder(t, dataDir, stores.AssetIssueV2Store)
+	compactAllStores(t, dataDir)
+
+	addr, raw := makeAddress(t, [20]byte{0x77})
+
+	res, err := Apply(dataDir, &Config{
+		Accounts: []AccountSpec{
+			{Address: addr, Balance: 5_000_000, AccountName: "wired"},
+		},
+	}, Options{})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.AccountsModified != 1 {
+		t.Errorf("AccountsModified = %d; want 1", res.AccountsModified)
+	}
+
+	// Re-open account store and verify the proto landed.
+	accountEng, err := db.OpenLevelDB(dataDir, stores.AccountStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer accountEng.Close()
+	got := readAccount(t, accountEng, raw)
+	if got.Balance != 5_000_000 {
+		t.Errorf("Balance on disk = %d; want 5_000_000", got.Balance)
+	}
+	if string(got.AccountName) != "wired" {
+		t.Errorf("AccountName = %q; want wired", got.AccountName)
+	}
+}

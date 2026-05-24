@@ -45,7 +45,11 @@ type Config struct {
 	// Task #147 — DynamicProperties timing knobs.
 	Properties PropertiesSpec
 
-	// TODO Task #148: Accounts []AccountSpec
+	// Task #148 — account balance/name/type/owner + per-account
+	// TRC10 holding update. Per-entry semantics match java DbFork:
+	// merge into existing account, create stub if absent.
+	Accounts []AccountSpec
+
 	// TODO Task #149: TRC20Contracts []TRC20Spec
 }
 
@@ -77,7 +81,14 @@ type Result struct {
 	// were non-zero in fork.conf).
 	PropertiesUpdated int `json:"properties_updated"`
 
-	// TODO Task #148: AccountsUpdated int
+	// AccountsModified counts fork.conf account specs processed.
+	// Equals len(cfg.Accounts) on the happy path; matches java
+	// DbFork's stdout (`{n} accounts have been modified`,
+	// DbFork.java:290-291). When the same address appears in
+	// multiple specs (e.g. one per TRC10 holding), the count is
+	// the spec count, not the distinct-address count.
+	AccountsModified int `json:"accounts_modified"`
+
 	// TODO Task #149: TRC20SlotsUpdated int
 }
 
@@ -151,6 +162,34 @@ func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
 		}
 		res.WitnessesWritten = written
 		res.ActiveWitnessesSet = active
+	}
+
+	// Accounts — only enter the branch when fork.conf actually lists
+	// accounts. Same principle-of-least-surprise gating as witnesses:
+	// a properties-only or witness-only conf doesn't open the
+	// account/asset stores at all.
+	if len(cfg.Accounts) > 0 {
+		accountEng, err := openStore(stores.AccountStore)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = accountEng.Close() }()
+		accountAssetEng, err := openStore(stores.AccountAssetStore)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = accountAssetEng.Close() }()
+		assetIssueV2Eng, err := openStore(stores.AssetIssueV2Store)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = assetIssueV2Eng.Close() }()
+		modified, err := MutateAccounts(accountEng, accountAssetEng,
+			assetIssueV2Eng, cfg.Accounts)
+		if err != nil {
+			return nil, err
+		}
+		res.AccountsModified = modified
 	}
 
 	// DynamicProperties — only touch if at least one field is non-zero.
