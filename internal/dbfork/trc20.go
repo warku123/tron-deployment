@@ -33,22 +33,31 @@ type TRC20Spec struct {
 	// (Base58Check). Must already exist in contractStore — DbFork
 	// validates by reading the SmartContract proto for version +
 	// trx_hash.
-	ContractAddress string
+	ContractAddress string `yaml:"contractAddress"`
 
 	// BalancesSlotPosition is the EVM storage slot index of the
 	// contract's `mapping(address => uint256) balances`. Default 0
 	// covers most ERC20/TRC20 implementations (OpenZeppelin's _balances
 	// slot, USDT's balances slot). Custom contracts may need a non-
 	// zero value; java applies the override only when > 0 (:331-333).
-	BalancesSlotPosition int
+	BalancesSlotPosition int `yaml:"balancesSlotPosition"`
 
 	// Account is the holder address (Base58Check). The leading 0x41
 	// byte is stripped to 20 bytes before the keccak slot derivation,
-	// matching Ethereum's address encoding convention.
-	Account string
+	// matching Ethereum's address encoding convention. Java's
+	// fork.conf names this key `address` — the Go field is renamed
+	// to disambiguate from ContractAddress at the call site.
+	Account string `yaml:"address"`
 
 	// Balance is the decimal-string token amount. Encoded as 32-byte
 	// big-endian uint256 in the on-disk storage row (TRC20 standard).
+	//
+	// In fork.conf (HOCON or YAML) this field MUST be quoted because
+	// real-world TRC20 supplies (e.g. 1.28e26 for a wrapped BTC peg)
+	// overflow int64 (max 9.2e18). The loader's wrong-type check
+	// surfaces an "expected string" error if the conf author omits
+	// the quotes on a large value, but small unquoted numbers would
+	// silently parse-and-lose precision.
 	//
 	// Documented divergence from java DbFork: java's
 	// `BigInteger(s, 10)` + `%064x` accepts a negative literal and
@@ -58,7 +67,7 @@ type TRC20Spec struct {
 	// accidentally negates a balance gets a clean error on Go and a
 	// stack trace on java. The equivalence test (Task #152) seeds
 	// only non-negative values, so this never triggers there.
-	Balance string
+	Balance string `yaml:"balance"`
 }
 
 // MutateTRC20Contracts applies the fork.conf trc20Contracts block:

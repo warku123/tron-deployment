@@ -25,20 +25,20 @@ type PropertiesSpec struct {
 	// missed slots, producing debug-log spam and delayed
 	// confirmations. Setting to current millis-epoch is the
 	// standard fork.conf value.
-	LatestBlockHeaderTimestamp int64
+	LatestBlockHeaderTimestamp int64 `yaml:"latestBlockHeaderTimestamp"`
 
 	// MaintenanceTimeInterval is the cadence between SR-set
 	// recomputations. Mainnet uses 6h (21600000 ms). Shorter
 	// values (e.g. 1 minute = 60000) help shadow-fork test
 	// proposals + protocol upgrades without waiting a day per
 	// cycle.
-	MaintenanceTimeInterval int64
+	MaintenanceTimeInterval int64 `yaml:"maintenanceTimeInterval"`
 
 	// NextMaintenanceTime is the absolute deadline of the next
 	// SR-set recomputation. Pair with LatestBlockHeaderTimestamp
 	// for a clean fork: set NextMaintenanceTime slightly in the
 	// future so the first cycle completes promptly.
-	NextMaintenanceTime int64
+	NextMaintenanceTime int64 `yaml:"nextMaintenanceTime"`
 }
 
 // MutateProperties writes any non-zero PropertiesSpec field into

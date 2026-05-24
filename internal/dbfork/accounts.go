@@ -44,33 +44,33 @@ var deterministicMarshal = proto.MarshalOptions{Deterministic: true}
 //     multiple times — java DbFork has the same restriction.
 type AccountSpec struct {
 	// Address is the Base58Check-encoded TRON address. Required.
-	Address string
+	Address string `yaml:"address"`
 
 	// AccountName is the optional nickname.
-	AccountName string
+	AccountName string `yaml:"accountName"`
 
 	// AccountType is one of "Normal" / "AssetIssue" / "Contract" —
 	// matches the AccountType enum name. Case-sensitive.
-	AccountType string
+	AccountType string `yaml:"accountType"`
 
 	// Balance is the TRX balance in sun (1 TRX = 10^6 sun). Only
 	// applied when > 0; zero/negative skipped per java DbFork :249.
-	Balance int64
+	Balance int64 `yaml:"balance"`
 
 	// Owner is the optional Base58Check-encoded owner-permission
 	// address. When set, replaces account.owner_permission with a
 	// single-key default permission (weight 1, threshold 1).
-	Owner string
+	Owner string `yaml:"owner"`
 
 	// TRC10ID is the optional asset ID (string-form numeric, e.g.
 	// "1000001"). Asset must already exist in assetIssueV2Store —
 	// DbFork only updates holdings, it does not issue new tokens.
-	TRC10ID string
+	TRC10ID string `yaml:"trc10Id"`
 
 	// TRC10Balance is the holding amount in token base units (the
 	// scale is per-asset precision, not auto-scaled). Only applied
 	// when > 0 AND TRC10ID set AND the asset exists.
-	TRC10Balance int64
+	TRC10Balance int64 `yaml:"trc10Balance"`
 }
 
 // MutateAccounts applies the fork.conf accounts block:

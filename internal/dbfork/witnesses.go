@@ -19,16 +19,16 @@ type WitnessSpec struct {
 	// Address is the Base58Check-encoded TRON address (e.g.
 	// "TS1hu4ZCcwBFYpQqUGoWy1GWBzamqxiT5W"). DecodeAddress
 	// converts to the 21-byte witnessStore key form.
-	Address string
+	Address string `yaml:"address"`
 
 	// URL is the optional witness profile URL. java DbFork only
 	// sets it when present in fork.conf.
-	URL string
+	URL string `yaml:"url"`
 
 	// VoteCount is the witness's initial vote count. Used both for
 	// the Witness.vote_count proto field AND for active-witness
 	// sort order (descending). java DbFork only sets it when > 0.
-	VoteCount int64
+	VoteCount int64 `yaml:"voteCount"`
 }
 
 // MutateWitnesses applies the fork.conf witnesses block:
