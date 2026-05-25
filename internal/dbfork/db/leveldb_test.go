@@ -334,6 +334,14 @@ func TestDetectKind_EnginePropertiesMalformed(t *testing.T) {
 			wantErrSub: "unrecognized ENGINE value",
 		},
 		{
+			// Empty value (`ENGINE=` with nothing after the `=`) is
+			// treated as an unknown value, not as a missing key. The
+			// parser cuts on `=` and trims whitespace, leaving "".
+			name:       "ENGINE= empty value",
+			body:       "ENGINE=\n",
+			wantErrSub: "unrecognized ENGINE value",
+		},
+		{
 			name:         "no ENGINE= line, only comments",
 			body:         "# nothing useful here\n# move along\n",
 			wantFallback: true,

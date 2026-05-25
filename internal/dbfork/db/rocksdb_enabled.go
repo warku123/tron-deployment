@@ -46,6 +46,11 @@ import (
 // under Task #162 follow-up — for now the rocksdb-tagged build is an
 // operator-driven workflow, not a default release artifact.
 //
+// Common troubleshooting: if cgo errors with `'rocksdb/c.h' file not
+// found`, the CGO_CFLAGS path is wrong (typo in $GROCKSDB, or `make
+// libs` didn't produce a dist/<os>_<arch>/include dir). Verify the
+// include dir exists before re-running `go build -tags rocksdb`.
+//
 // # On-disk layout
 //
 // Matches LevelDB's: java-tron writes each store as a standalone
@@ -214,6 +219,13 @@ func (i *rocksDBIterator) Key() []byte {
 	// here. The defensive-copy contract is what matters; the Slice
 	// wrapper is just an addressable handle to the iterator-owned
 	// buffer, not a separately-allocated chunk we'd otherwise leak.
+	//
+	// Post-Close guard mirrors Error()'s: after Close(), i.it.c is
+	// nil and the C call would deref a nil pointer. Match goleveldb's
+	// safe-after-Release contract by returning nil.
+	if i.closed {
+		return nil
+	}
 	k := i.it.Key()
 	data := k.Data()
 	out := make([]byte, len(data))
@@ -222,7 +234,11 @@ func (i *rocksDBIterator) Key() []byte {
 }
 
 func (i *rocksDBIterator) Value() []byte {
-	// Same buffer-reuse semantics + same no-op Free() as Key().
+	// Same buffer-reuse semantics + same no-op Free() + same post-
+	// Close guard as Key().
+	if i.closed {
+		return nil
+	}
 	v := i.it.Value()
 	data := v.Data()
 	out := make([]byte, len(data))

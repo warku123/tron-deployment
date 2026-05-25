@@ -17,21 +17,10 @@
 //	go build ./...                  → LevelDB only, pure Go, single static binary
 //	go build -tags rocksdb ./...    → + RocksDB via cgo (grocksdb)
 //
-// The rocksdb build is heavier than typical cgo: grocksdb v1.10.8 is
-// hard-coupled to RocksDB 10.10.1, and neither apt-librocksdb-dev
-// (6.x-8.x on current Ubuntu releases) nor homebrew-rocksdb (11.x) is
-// compatible. Operators run grocksdb's bundled build script which
-// compiles RocksDB + snappy/zlib/lz4/zstd statically:
-//
-//	GROCKSDB=$(go env GOMODCACHE)/github.com/linx!gnu/grocksdb@v1.10.8
-//	(cd "$GROCKSDB" && make libs)   # ~10-15 min, one-time
-//
-//	export CGO_CFLAGS="-I$GROCKSDB/dist/$(go env GOOS)_$(go env GOARCH)/include"
-//	export CGO_LDFLAGS="-L$GROCKSDB/dist/$(go env GOOS)_$(go env GOARCH)/lib -lrocksdb -lstdc++ -lm -lz -lbz2 -llz4 -lzstd -lsnappy"
-//	go build -tags rocksdb ./...
-//
-// See rocksdb_enabled.go's package doc for the per-engine details +
-// the validation status note. CI integration is Task #163.
+// The rocksdb build needs a specifically-versioned librocksdb that
+// neither apt nor brew currently ships — see rocksdb_enabled.go's
+// package doc for the full `make libs` + CGO_* recipe and the
+// validation status note. CI integration is Task #163.
 //
 // The `Engine` interface keeps mutation code (witnesses.go,
 // accounts.go, …) backend-agnostic. Both engines expose the same
