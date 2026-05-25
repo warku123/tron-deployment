@@ -38,7 +38,7 @@ func TestPick_NoMatch(t *testing.T) {
 }
 
 func TestLookupDomain(t *testing.T) {
-	if s := LookupDomain("database.nileex.io"); s == nil || s.Network != NetworkNile {
+	if s := LookupDomain("snapshots.nileex.io"); s == nil || s.Network != NetworkNile {
 		t.Fatalf("nile lookup failed: %+v", s)
 	}
 	if s := LookupDomain("not-a-real-host"); s != nil {
@@ -51,9 +51,24 @@ func TestTarballURL_Variants(t *testing.T) {
 	if got := TarballURL(main, "backup20250115", DBKindLite); got != "http://34.143.247.77/backup20250115/LiteFullNode_output-directory.tgz" {
 		t.Fatalf("mainnet lite URL wrong: %s", got)
 	}
-	nile := *LookupDomain("database.nileex.io")
-	if got := TarballURL(nile, "backup20250115", DBKindLite); got != "https://nile-snapshots.s3-accelerate.amazonaws.com/backup20250115/LiteFullNode_output-directory.tgz" {
-		t.Fatalf("nile URL wrong: %s", got)
+	// Nile lite: BaseURL = https://snapshots.nileex.io; the LiteFullNode
+	// tarball is published at /backup<date>/LiteFullNode_*.tgz.
+	nileLite := Pick(Filter{Network: NetworkNile, DBKind: DBKindLite})
+	if nileLite == nil {
+		t.Fatal("nile lite pick returned nil")
+	}
+	if got := TarballURL(*nileLite, "backup20260524", DBKindLite); got != "https://snapshots.nileex.io/backup20260524/LiteFullNode_output-directory.tgz" {
+		t.Fatalf("nile lite URL wrong: %s", got)
+	}
+	// Nile rocksdb: BaseURL bakes in the /rocksdb prefix so the same
+	// BaseURL+"/"+backup+"/"+tarball composition produces the published
+	// rocksdb path. FullNode_*.tgz (no lite variant published).
+	nileRocks := Pick(Filter{Network: NetworkNile, DBEngine: EngineRocksDB})
+	if nileRocks == nil {
+		t.Fatal("nile rocksdb pick returned nil")
+	}
+	if got := TarballURL(*nileRocks, "backup20260524", DBKindFull); got != "https://snapshots.nileex.io/rocksdb/backup20260524/FullNode_output-directory.tgz" {
+		t.Fatalf("nile rocksdb URL wrong: %s", got)
 	}
 	if got := TarballURL(main, "x", DBKind("bogus")); got != "" {
 		t.Fatalf("unknown kind should return empty, got %s", got)

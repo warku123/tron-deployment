@@ -2,11 +2,12 @@
 // upstream public mirrors and pipes them straight into a target directory
 // (no on-disk .tgz copy in between).
 //
-// The source list mirrors tron-docker/tools/trond/config/node.go as of
-// 2025-Q1 — when those endpoints rotate, update SourceTable here. We
-// deliberately don't pull the list over the network at start-up: the
-// upstream has no canonical "list-of-mirrors" endpoint, so a stale
-// hard-coded table beats a fragile bootstrap call.
+// The source list mirrors tron-docker/tools/trond/config/node.go; last
+// audited 2026-05-25 (Nile lite + Nile rocksdb HEAD-checked). When
+// endpoints rotate, update SourceTable here — there is no canonical
+// upstream "list-of-mirrors" endpoint, so a stale hard-coded table
+// beats a fragile bootstrap call. The fragility of *this* table is
+// instead addressed by the scheduled `--probe` check (#161 follow-up).
 package snapshot
 
 // Network distinguishes which TRON network a snapshot belongs to. Private
@@ -153,11 +154,28 @@ var SourceTable = []Source{
 		DBKind:        DBKindLite,
 		DBEngine:      EngineLevelDB,
 		Region:        RegionSingapore,
-		Domain:        "database.nileex.io",
-		BaseURL:       "https://nile-snapshots.s3-accelerate.amazonaws.com",
+		Domain:        "snapshots.nileex.io",
+		BaseURL:       "https://snapshots.nileex.io",
 		IndexStrategy: "date",
 		ApproxSizeGB:  30,
-		Description:   "Nile testnet fullnode/lite-fullnode (~30 GB)",
+		Description:   "Nile testnet fullnode/lite-fullnode (~30 GB, LevelDB)",
+	},
+	{
+		// Nile RocksDB-encoded full snapshot. No lite variant published.
+		// Required for arm64 hosts (java-tron's Storage.java:180 forces
+		// RocksDB on arm64 regardless of config), and for any operator
+		// running with storage.db.engine = ROCKSDB. The /rocksdb prefix
+		// is baked into BaseURL so download.go's BaseURL+"/"+backup+"/"+
+		// tarball composition keeps the same shape as every other row.
+		Network:       NetworkNile,
+		DBKind:        DBKindFull,
+		DBEngine:      EngineRocksDB,
+		Region:        RegionSingapore,
+		Domain:        "snapshots.nileex.io",
+		BaseURL:       "https://snapshots.nileex.io/rocksdb",
+		IndexStrategy: "date",
+		ApproxSizeGB:  90,
+		Description:   "Nile testnet fullnode (~90 GB, RocksDB — required on arm64)",
 	},
 }
 
