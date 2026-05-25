@@ -186,9 +186,25 @@ the engine works against real data) are fine on arm64.
 
 A RocksDB-format Nile snapshot exists at
 `snapshots.nileex.io/rocksdb/backup<date>/FullNode_output-directory.tgz`
-but dbfork's RocksDB engine is currently a build-tagged stub (see
-internal/dbfork/db/rocksdb_enabled.go). Implementing it requires cgo +
-grocksdb and is out of Phase 1 scope.
+and dbfork's RocksDB engine is implemented via grocksdb under the
+`rocksdb` build tag. See `internal/dbfork/db/rocksdb_enabled.go` for
+the full build prereqs — short version, grocksdb v1.10.8 is hard-
+coupled to RocksDB 10.10.1, so build via the bundled script:
+
+```bash
+GROCKSDB=$(go env GOMODCACHE)/github.com/linx!gnu/grocksdb@v1.10.8
+cd "$GROCKSDB" && make libs   # ~10-15 min, builds RocksDB + deps statically
+
+cd /path/to/tron-deployment
+export CGO_CFLAGS="-I$GROCKSDB/dist/$(go env GOOS)_$(go env GOARCH)/include"
+export CGO_LDFLAGS="-L$GROCKSDB/dist/$(go env GOOS)_$(go env GOARCH)/lib -lrocksdb -lstdc++ -lm -lz -lbz2 -llz4 -lzstd -lsnappy"
+go build -tags rocksdb -o bin/trond .
+```
+
+Then point trond at the RocksDB snapshot the same way as LevelDB —
+DetectKind reads java-tron's per-store `engine.properties` and routes
+automatically. Release-binary support (CI, goreleaser, cross-compile)
+is tracked in Task #163.
 
 ## Phase 1 caveats
 
