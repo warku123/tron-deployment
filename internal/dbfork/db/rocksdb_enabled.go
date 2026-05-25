@@ -17,12 +17,15 @@ import (
 //
 // # Validation status
 //
-// NOT runtime-validated on the original author's machine — the only
-// available librocksdb at commit time was Homebrew 11.x, which is
-// API-incompatible with grocksdb v1.10.8's pinned 10.10.1. The
-// implementation is a mechanical mirror of leveldb.go; runtime
-// validation is gated on the build infrastructure landing in Task
-// #163 (CI job that runs `make libs` + the rocksdb-tagged tests).
+// Runtime-validated on linux/arm64 against grocksdb v1.10.8 +
+// RocksDB 10.10.1 built via `make libs`. The rocksdb-tagged test
+// suite (TestRocksDBEngine_RoundTrip + TestDetectKind_RocksDB)
+// passes; a synthetic shadow-fork mutate against an empty
+// RocksDB-flavoured data dir produces the same Result counters
+// as the LevelDB path (1 witness, 1 active slate, 1 account, 3
+// properties) and the on-disk state read-back matches what the
+// mutation engine writes via the Batch interface. Wiring this
+// into CI is still Task #163.
 //
 // # Build prerequisites
 //
