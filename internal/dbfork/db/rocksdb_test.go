@@ -194,9 +194,11 @@ func TestDetectKind_RocksDB(t *testing.T) {
 	for i := byte(0); i < 100; i++ {
 		_ = db.Put(wopts, []byte{i}, make([]byte, 1024))
 	}
-	if err := db.Flush(grocksdb.NewDefaultFlushOptions()); err != nil {
+	fopts := grocksdb.NewDefaultFlushOptions()
+	if err := db.Flush(fopts); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
+	fopts.Destroy()
 	wopts.Destroy()
 	db.Close()
 

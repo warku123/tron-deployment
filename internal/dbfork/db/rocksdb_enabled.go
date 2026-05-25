@@ -3,7 +3,6 @@
 package db
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +14,15 @@ import (
 // building with `-tags rocksdb`. Required for arm64 hosts (java-tron's
 // Storage.java:180 forces RocksDB on arm64 regardless of config) and
 // for any operator running java-tron with `storage.db.engine = ROCKSDB`.
+//
+// # Validation status
+//
+// NOT runtime-validated on the original author's machine — the only
+// available librocksdb at commit time was Homebrew 11.x, which is
+// API-incompatible with grocksdb v1.10.8's pinned 10.10.1. The
+// implementation is a mechanical mirror of leveldb.go; runtime
+// validation is gated on the build infrastructure landing in Task
+// #163 (CI job that runs `make libs` + the rocksdb-tagged tests).
 //
 // # Build prerequisites
 //
@@ -116,14 +124,18 @@ func (e *rocksDBEngine) NewIterator() Iterator {
 }
 
 func (e *rocksDBEngine) Close() error {
-	// Order matters: close the DB before destroying option handles —
-	// the DB references them internally. ropts/wopts are leaked if we
-	// don't Destroy() them; opts is consumed by the DB and freed when
-	// the DB closes (grocksdb's semantics).
+	// Order: close the DB first so any in-flight iterators / pending
+	// reads finish against valid options, THEN free the options. All
+	// three handles (opts, ropts, wopts) leak C memory if not
+	// explicitly Destroy()ed — grocksdb anchors them on the Go side
+	// for GC, but DB.Close() does NOT call Destroy on them (verified
+	// against grocksdb@v1.10.8/db.go:2063, which only calls
+	// rocksdb_close + nil-out). A naive "DB consumes opts" mental
+	// model from C++ RocksDB ownership doesn't apply here.
 	e.db.Close()
 	e.ropts.Destroy()
 	e.wopts.Destroy()
-	// opts intentionally NOT Destroy()ed — DB.Close() handles it.
+	e.opts.Destroy()
 	return nil
 }
 
@@ -169,6 +181,7 @@ func (b *rocksDBBatch) Close() {
 type rocksDBIterator struct {
 	it      *grocksdb.Iterator
 	started bool
+	closed  bool
 	err     error
 }
 
@@ -191,11 +204,17 @@ func (i *rocksDBIterator) Next() bool {
 }
 
 func (i *rocksDBIterator) Key() []byte {
-	// grocksdb.Iterator.Key() returns a grocksdb.Slice that's only
-	// valid until the next Next()/Close(). Copy out so callers can
-	// retain across iteration (the witness-erase pattern).
+	// grocksdb.Iterator.Key() returns a *Slice whose underlying buffer
+	// is owned by the iterator and overwritten on the next Next()/
+	// Close() — we copy out so callers can retain across iteration
+	// (the witness-erase pattern).
+	//
+	// Note: the Slice itself has `freed=true` set at construction (see
+	// grocksdb@v1.10.8/iterator.go:65), so Slice.Free() is a no-op
+	// here. The defensive-copy contract is what matters; the Slice
+	// wrapper is just an addressable handle to the iterator-owned
+	// buffer, not a separately-allocated chunk we'd otherwise leak.
 	k := i.it.Key()
-	defer k.Free()
 	data := k.Data()
 	out := make([]byte, len(data))
 	copy(out, data)
@@ -203,8 +222,8 @@ func (i *rocksDBIterator) Key() []byte {
 }
 
 func (i *rocksDBIterator) Value() []byte {
+	// Same buffer-reuse semantics + same no-op Free() as Key().
 	v := i.it.Value()
-	defer v.Free()
 	data := v.Data()
 	out := make([]byte, len(data))
 	copy(out, data)
@@ -215,6 +234,13 @@ func (i *rocksDBIterator) Error() error {
 	if i.err != nil {
 		return i.err
 	}
+	if i.closed {
+		// it.Err() after Close() dereferences a nil C pointer in
+		// grocksdb. The LevelDB wrapper is graceful here (goleveldb's
+		// iterator.Error after Release is safe), so we mirror that
+		// contract: post-Close Error() returns the last stashed err.
+		return nil
+	}
 	if err := i.it.Err(); err != nil {
 		return err
 	}
@@ -222,10 +248,15 @@ func (i *rocksDBIterator) Error() error {
 }
 
 func (i *rocksDBIterator) Close() {
+	if i.closed {
+		return
+	}
+	// Stash any final iterator error BEFORE closing so subsequent
+	// Error() calls don't try to dereference the closed handle.
+	if err := i.it.Err(); err != nil && i.err == nil {
+		i.err = err
+	}
 	i.it.Close()
+	i.closed = true
 }
 
-// Sentinel — defensive shape check that grocksdb is wired through. If
-// the cgo build fails or grocksdb drops a method we use, the compiler
-// catches it here rather than at runtime.
-var _ = errors.New

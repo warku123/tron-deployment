@@ -114,6 +114,22 @@ func DetectKind(dataDir, storeName string) (EngineKind, error) {
 // We do not invoke a real .properties parser — the file's grammar is
 // trivial and a 5-line scan over `key=value` (skipping `#` comments)
 // is correct.
+//
+// Parser assumptions, pinned here so a future change to java-tron's
+// engine.properties format surfaces as a code change, not a silent
+// mis-parse:
+//   - ENGINE values are 7-bit ASCII (LEVELDB / ROCKSDB) per java-tron's
+//     Storage.java. No need to handle java.util.Properties' \uNNNN
+//     unicode-escape syntax.
+//   - No line continuations. java.util.Properties supports `\` at EOL
+//     to fold a value across lines; this parser ignores that. Doesn't
+//     bite today because ENGINE values are short.
+//   - First non-comment line with `ENGINE=` wins. If a future java-tron
+//     decides to emit multiple ENGINE= entries (e.g. column-family
+//     specific), this picks the first.
+//
+// If any assumption breaks, swap to bufio.Scanner + a real
+// java.util.Properties-style parser.
 func readEngineProperties(path string) (EngineKind, bool, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

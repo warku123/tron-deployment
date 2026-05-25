@@ -308,6 +308,77 @@ func TestDetectKind_EngineProperties(t *testing.T) {
 	}
 }
 
+// TestDetectKind_EnginePropertiesMalformed pins the parser's handling
+// of pathological engine.properties content. Real java-tron writes
+// 7-bit ASCII ENGINE values, but if a future release changes that
+// (or a test fixture is hand-written), parser robustness matters:
+//
+//   - Unknown ENGINE value → typed error (not silent fallthrough).
+//   - File present but no ENGINE= line → fall through to other
+//     heuristics (treated as "missing", since the file conveys no
+//     declaration).
+//
+// What we do NOT pin: line continuations (`\` at EOL) or `\uNNNN`
+// escapes — see readEngineProperties' docstring for the assumption
+// boundary.
+func TestDetectKind_EnginePropertiesMalformed(t *testing.T) {
+	cases := []struct {
+		name         string
+		body         string
+		wantFallback bool   // true: parser returns (0, false, nil) → tries other heuristics
+		wantErrSub   string // non-empty: parser returns error containing this
+	}{
+		{
+			name:       "unknown ENGINE value",
+			body:       "ENGINE=POSTGRES\n",
+			wantErrSub: "unrecognized ENGINE value",
+		},
+		{
+			name:         "no ENGINE= line, only comments",
+			body:         "# nothing useful here\n# move along\n",
+			wantFallback: true,
+		},
+		{
+			name:         "empty file",
+			body:         "",
+			wantFallback: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			storeDir := filepath.Join(dataDir, "database", "probe")
+			if err := os.MkdirAll(storeDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(storeDir, "engine.properties"),
+				[]byte(tc.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := DetectKind(dataDir, "probe")
+			if tc.wantErrSub != "" {
+				if err == nil {
+					t.Fatal("expected error for unknown ENGINE value")
+				}
+				if !strings.Contains(err.Error(), tc.wantErrSub) {
+					t.Errorf("err = %v; want substring %q", err, tc.wantErrSub)
+				}
+				return
+			}
+			// Fallback case: no ENGINE line → engine.properties is
+			// treated as missing → DetectKind falls through to other
+			// heuristics. With no other files in the store dir, the
+			// final fallback returns the "no engine indicators" error.
+			if err == nil {
+				t.Fatal("expected error: no engine indicators after fallback")
+			}
+			if !strings.Contains(err.Error(), ".ldb/.sst") {
+				t.Errorf("err = %v; want extension-heuristic message", err)
+			}
+		})
+	}
+}
+
 // TestDetectKind_SSTDefaultsToLevelDB pins the fallback heuristic for
 // the case where engine.properties is absent (older snapshots, manually-
 // created test fixtures) but `.sst` files are present. Java

@@ -181,8 +181,10 @@ so the container crash-loops with `Shutting down with code: ROCKSDB_INIT(1)`
 13+ times before docker gives up. Verified empirically on AWS Graviton2
 during the Phase 1 PoC test run.
 
-**For the `apply` phase, use an amd64 host.** mutate-only runs (proving
-the engine works against real data) are fine on arm64.
+**For the `apply` phase, use an amd64 host OR build trond with
+`-tags rocksdb` AND use a RocksDB-format snapshot.** mutate-only runs
+(proving the engine works against real data) are fine on arm64 with
+the default LevelDB build.
 
 A RocksDB-format Nile snapshot exists at
 `snapshots.nileex.io/rocksdb/backup<date>/FullNode_output-directory.tgz`
