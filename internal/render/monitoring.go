@@ -102,6 +102,13 @@ func RenderMonitoringCompose(name string, i *intent.Intent, targets []Monitoring
 }
 
 // RenderPrometheusConfig generates prometheus.yml content.
+//
+// The retention parameter is currently unused: Prometheus TSDB retention is
+// configured via the container's command-line args in docker-compose.yaml
+// ("--storage.tsdb.retention.time=..."), not in prometheus.yml.  The
+// parameter is kept in the signature for backward compat with existing
+// callers and tests; pass an empty string when regeneration is triggered by
+// network-add (where compose is not rewritten).
 func RenderPrometheusConfig(targets []MonitoringTarget, retention string) string {
 	var sb strings.Builder
 	sb.WriteString("global:\n")
