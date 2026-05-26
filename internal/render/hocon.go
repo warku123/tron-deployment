@@ -212,6 +212,23 @@ func applyPortOverrides(config string, node *intent.NodeSpec) string {
 	if ports.P2P != 0 {
 		config = replaceListenPort(config, ports.P2P)
 	}
+	if ports.JSONRPC != 0 {
+		// Task #165: features.jsonrpc=true used to enable the service but
+		// leave httpFullNodePort commented out, so java-tron fell back to
+		// its internal default 8545 while docker bound the intent's port.
+		// Wiring this here means features.jsonrpc + ports.jsonrpc compose
+		// correctly. ensureJSONRPCEnabled (called from applyFeatureOverrides)
+		// still handles the enable bit; this one handles the port.
+		config = replaceJSONRPCPort(config, ports.JSONRPC)
+	}
+	if ports.Metrics != 0 {
+		// node.metrics.prometheus.port — the metrics endpoint follows the
+		// same shape as jsonrpc: the template ships with a default of 9527
+		// and trond needs to plumb the intent value through. Untested in
+		// production but shipped alongside the JSONRPC fix because the
+		// failure mode would be symmetric.
+		config = replaceMetricsPort(config, ports.Metrics)
+	}
 
 	return config
 }
@@ -272,6 +289,78 @@ func replaceListenPort(config string, port int) string {
 		if strings.HasPrefix(trimmed, "listen.port") {
 			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 			lines[i] = fmt.Sprintf("%slisten.port = %d", indent, port)
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// replaceJSONRPCPort sets node.jsonrpc.httpFullNodePort to port.
+// The template ships with the line commented out (`# httpFullNodePort
+// = 8545`); we uncomment + set when an intent provides a value. If the
+// line is missing entirely (operator-edited config), we insert one
+// before the closing brace so the port is always honoured.
+func replaceJSONRPCPort(config string, port int) string {
+	lines := strings.Split(config, "\n")
+	inJSONRPC := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "jsonrpc") && strings.Contains(trimmed, "{") {
+			inJSONRPC = true
+			continue
+		}
+		if !inJSONRPC {
+			continue
+		}
+		// Match both commented and uncommented forms — the default
+		// template has it commented out.
+		uncommented := strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+		if strings.HasPrefix(uncommented, "httpFullNodePort") {
+			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			lines[i] = fmt.Sprintf("%shttpFullNodePort = %d", indent, port)
+			return strings.Join(lines, "\n")
+		}
+		if trimmed == "}" {
+			// jsonrpc block ended without the key — synthesise it.
+			indent := "    "
+			lines[i] = fmt.Sprintf("%shttpFullNodePort = %d\n%s", indent, port, line)
+			return strings.Join(lines, "\n")
+		}
+	}
+	return config
+}
+
+// replaceMetricsPort sets node.metrics.prometheus.port to port. Same
+// shape as replaceJSONRPCPort but the key lives inside
+// node.metrics.prometheus, so we track nesting depth.
+func replaceMetricsPort(config string, port int) string {
+	lines := strings.Split(config, "\n")
+	inMetrics := false
+	inPrometheus := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "node.metrics") && strings.Contains(trimmed, "{") {
+			inMetrics = true
+			continue
+		}
+		if !inMetrics {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "prometheus") && strings.Contains(trimmed, "{") {
+			inPrometheus = true
+			continue
+		}
+		if inPrometheus {
+			if strings.HasPrefix(trimmed, "port") {
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				lines[i] = fmt.Sprintf("%sport = %d", indent, port)
+				return strings.Join(lines, "\n")
+			}
+			if trimmed == "}" {
+				inPrometheus = false
+			}
+		}
+		if trimmed == "}" && !inPrometheus {
 			break
 		}
 	}
