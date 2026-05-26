@@ -44,6 +44,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # GitHub-hosted runners ship ~14 GB of preinstalled tools we
+      # don't need (Android SDK, .NET, CodeQL packages, etc.) and have
+      # ~84 GB total disk. The Nile lite snapshot is ~45 GB compressed
+      # / ~90 GB extracted, so we MUST reclaim disk before trond's
+      # pre-download free-space check (the first run's "Error [DISK_
+      # SPACE_ERROR]: need ~91.57 GB free, have 88.36 GB" failure).
+      # This action reclaims ~30-40 GB by removing unused tools.
+      - name: Free runner disk space for the Nile fixture
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          # docker engine cleanup is the slow pass; we don't run docker
+          # in this workflow but disabling saves several minutes.
+          docker-images: false
+          swap-storage: false
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
