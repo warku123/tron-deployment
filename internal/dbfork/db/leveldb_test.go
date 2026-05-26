@@ -189,12 +189,12 @@ func TestLevelDBEngine_RoundTrip(t *testing.T) {
 //
 // We exercise the path by:
 //
-//   1. Opening a goleveldb DB and writing+compacting so .ldb files
-//      land on disk (mirrors what mutation actually produces).
-//   2. Planting a `.bak` file by hand to simulate the residue we
-//      observed in real Nile snapshots on 2026-05-25.
-//   3. Closing via the dbfork engine wrapper and asserting the dir
-//      is in java-tron-readable shape.
+//  1. Opening a goleveldb DB and writing+compacting so .ldb files
+//     land on disk (mirrors what mutation actually produces).
+//  2. Planting a `.bak` file by hand to simulate the residue we
+//     observed in real Nile snapshots on 2026-05-25.
+//  3. Closing via the dbfork engine wrapper and asserting the dir
+//     is in java-tron-readable shape.
 func TestLevelDBClose_RenamesLDBToSST(t *testing.T) {
 	dataDir := t.TempDir()
 	storeDir := filepath.Join(dataDir, "database", "account")

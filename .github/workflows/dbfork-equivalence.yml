@@ -63,15 +63,24 @@ jobs:
                     # here if the toolkit ever ships a breaking change
 
       - name: Build java DbFork toolkit
+        # tron-docker's tools/ is a multi-project gradle build. The
+        # wrapper lives at tools/gradlew/, and toolkit is referenced
+        # as the `:toolkit` subproject. Per the toolkit README's
+        # "Build The Toolkit" section. shadowJar (fat jar) bundles
+        # the dependency closure so the equivalence test can launch
+        # via `java -jar` without a classpath dance.
         run: |
-          cd tron-docker/tools/toolkit
-          ./gradlew shadowJar
-          ls -la build/libs/
+          cd tron-docker/tools/gradlew
+          ./gradlew :toolkit:shadowJar
+          ls -la ../toolkit/build/libs/
 
       - name: Resolve toolkit jar path
         id: jar
+        # shadowJar emits both Toolkit-x.y.z.jar and Toolkit-x.y.z-all
+        # .jar; we want the -all (fat) one so java -jar finds bundled
+        # deps. Glob covers any version tag.
         run: |
-          JAR=$(ls tron-docker/tools/toolkit/build/libs/toolkit-*-all.jar | head -1)
+          JAR=$(ls tron-docker/tools/toolkit/build/libs/Toolkit*-all.jar | head -1)
           echo "path=$JAR" >> "$GITHUB_OUTPUT"
           echo "Found toolkit jar at: $JAR"
 

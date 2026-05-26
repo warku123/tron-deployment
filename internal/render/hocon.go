@@ -347,7 +347,7 @@ func replaceJSONRPCPort(config string, port int) string {
 // the first sub-block of node.metrics.
 func replaceMetricsPort(config string, port int) string {
 	lines := strings.Split(config, "\n")
-	depth := 0      // brace depth relative to node.metrics's open brace
+	depth := 0 // brace depth relative to node.metrics's open brace
 	prometheus := false
 	prometheusDepth := -1
 	inMetrics := false

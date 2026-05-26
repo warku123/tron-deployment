@@ -146,11 +146,11 @@ func TestRenderHOCON_ShadowForkRocksIntent(t *testing.T) {
 	// metrics-on-nile is a separate gap not in scope here — tracked
 	// elsewhere. JSON-RPC + HTTP + P2P all have slots and must wire.
 	wants := map[string]string{
-		"http (node.http.fullNodePort)":              "fullNodePort = 58090",
-		"jsonrpc (node.jsonrpc.httpFullNodeEnable)":  "httpFullNodeEnable = true",
-		"jsonrpc (node.jsonrpc.httpFullNodePort)":    "httpFullNodePort = 58545",
-		"p2p (node.listen.port)":                     "listen.port = 58888",
-		"storage.db.engine override (rocksdb path)":  "ROCKSDB",
+		"http (node.http.fullNodePort)":             "fullNodePort = 58090",
+		"jsonrpc (node.jsonrpc.httpFullNodeEnable)": "httpFullNodeEnable = true",
+		"jsonrpc (node.jsonrpc.httpFullNodePort)":   "httpFullNodePort = 58545",
+		"p2p (node.listen.port)":                    "listen.port = 58888",
+		"storage.db.engine override (rocksdb path)": "ROCKSDB",
 	}
 	for label, want := range wants {
 		if !strings.Contains(out, want) {

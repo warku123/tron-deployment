@@ -107,7 +107,13 @@ jobs:
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
-          version: "29.x"
+          # Pinned to 35.x because that's the version that generated
+          # the committed internal/dbfork/proto/pb/*.pb.go files (see
+          # their `protoc v7.35.0` header). Drift is checked against
+          # the EXACT generator version, so CI's protoc must match
+          # what produced the committed bytes — earlier 29.x setting
+          # silently differed on the header line and reported drift.
+          version: "35.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install pinned tools (protoc-gen-go via go.mod)
         run: go install tool
