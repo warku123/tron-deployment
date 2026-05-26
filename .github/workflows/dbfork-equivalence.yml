@@ -1,0 +1,119 @@
+name: dbfork Go-vs-Java Equivalence
+
+# Phase 1 release gate: runs TestEquivalence_GoVsJava, which stands
+# up two scratch copies of a Nile snapshot, applies the canonical
+# fork.conf via Go (dbfork) and Java (tron-docker/tools/toolkit
+# DbFork), and diffs all 8 stores. A pass means the Go port produces
+# byte-identical state to the reference implementation.
+#
+# Why a separate workflow:
+#   - The fixture is multi-GB (Nile lite snapshot, ~45 GB compressed).
+#     Too expensive to run on every PR; this fires on schedule + on
+#     explicit dispatch + on PRs that touch internal/dbfork/**.
+#   - Builds the java toolkit on demand. Requires JDK 11+ and the
+#     `tron-docker` repo as a peer checkout.
+#
+# When a release-bound PR lands in internal/dbfork, this workflow
+# acts as the final byte-equivalence gate before the PR can merge.
+
+on:
+  push:
+    branches: [master, develop]
+    paths:
+      - 'internal/dbfork/**'
+      - '.github/workflows/dbfork-equivalence.yml'
+  pull_request:
+    paths:
+      - 'internal/dbfork/**'
+      - '.github/workflows/dbfork-equivalence.yml'
+  schedule:
+    # Weekly catch — surfaces snapshot-format drift (java DbFork
+    # upstream changes, Nile snapshot publisher output rotation)
+    # even when no dbfork code has changed.
+    - cron: "0 6 * * 0"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  equivalence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90  # snapshot download is the long pole (~30-45 min)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Checkout tron-docker for java toolkit
+        uses: actions/checkout@v4
+        with:
+          repository: tronprotocol/tron-docker
+          path: tron-docker
+          ref: main  # follows tron-docker's release cadence; pin a SHA
+                    # here if the toolkit ever ships a breaking change
+
+      - name: Build java DbFork toolkit
+        run: |
+          cd tron-docker/tools/toolkit
+          ./gradlew shadowJar
+          ls -la build/libs/
+
+      - name: Resolve toolkit jar path
+        id: jar
+        run: |
+          JAR=$(ls tron-docker/tools/toolkit/build/libs/toolkit-*-all.jar | head -1)
+          echo "path=$JAR" >> "$GITHUB_OUTPUT"
+          echo "Found toolkit jar at: $JAR"
+
+      - name: Cache Nile fixture
+        id: fixture-cache
+        uses: actions/cache@v4
+        with:
+          path: ./nile-fixture
+          # Refresh weekly; snapshot rotates daily but byte content
+          # doesn't matter for equivalence (same snapshot is used by
+          # both Go and Java, so any captured copy is fine).
+          key: nile-fixture-${{ github.run_id }}
+          restore-keys: |
+            nile-fixture-
+
+      - name: Build trond + download Nile fixture (if cache miss)
+        if: steps.fixture-cache.outputs.cache-hit != 'true'
+        run: |
+          go build -o bin/trond ./
+          ./bin/trond snapshot download \
+            --network nile --type lite \
+            --to ./nile-fixture
+          # Drop the .tgz tarball; only the extracted output-directory
+          # is referenced by the equivalence test.
+          find ./nile-fixture -name "*.tgz" -delete
+
+      - name: Run equivalence test
+        env:
+          DBFORK_NILE_FIXTURE: ${{ github.workspace }}/nile-fixture/output-directory
+          DBFORK_JAVA_TOOLKIT: ${{ github.workspace }}/${{ steps.jar.outputs.path }}
+          DBFORK_FORK_CONF: ${{ github.workspace }}/tron-docker/tools/toolkit/src/main/resources/fork.conf
+          DBFORK_JAVA_HEAP: "4g"
+        run: |
+          go test -v -timeout 30m -run TestEquivalence_GoVsJava ./internal/dbfork/
+
+      - name: Upload diff log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: equivalence-failure-log
+          path: |
+            **/test.log
+            tron-docker/tools/toolkit/build/logs/
+          retention-days: 14
+          if-no-files-found: ignore

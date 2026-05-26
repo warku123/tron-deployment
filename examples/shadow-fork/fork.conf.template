@@ -38,3 +38,33 @@ accounts = [
 latestBlockHeaderTimestamp = <NOW_MS>
 maintenanceTimeInterval    = 21600000
 nextMaintenanceTime        = <NEXT_MAINTENANCE_MS>
+
+# TRC20 contract balance overrides (commented-out template). Useful
+# for shadow-forking token economic state — fund an address with a
+# specific TRC20 balance so contract interactions see it post-fork.
+#
+# Fields:
+#   contractAddress       — TRC20 contract's Base58 address
+#   balancesSlotPosition  — storage slot index of the `balances` mapping
+#                           in the contract's Solidity source (typically
+#                           0 for OpenZeppelin ERC20-style, 1 for some
+#                           USDT-N derivatives — check the contract ABI)
+#   address               — the address whose balance to set (Base58)
+#   balance               — new balance as a DECIMAL STRING (in raw
+#                           units — for a 6-decimal token, 1.5 USDT
+#                           is "1500000")
+#
+# Verify with `trc20_slots_updated` in the mutate JSON output: each
+# entry here increments the counter on successful write. See
+# internal/dbfork/trc20.go for the slot-derivation math (keccak256
+# of the concatenated address + slot bytes; Solidity ABIv0 vs ABIv1
+# changes the hash composition).
+#
+# trc20Contracts = [
+#   {
+#     contractAddress      = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+#     balancesSlotPosition = 0
+#     address              = "<WITNESS_TRON_ADDRESS>"
+#     balance              = "98800000000000000"
+#   }
+# ]
