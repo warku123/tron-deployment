@@ -101,6 +101,13 @@ func (e *levelDBEngine) Close() error {
 // convertGoleveldbToSST renames every `*.ldb` to `*.sst` and removes
 // `*.bak`/`*.old` in storeDir. The sweep is bounded to the directory's
 // immediate children (LevelDB doesn't nest); a single readdir is enough.
+//
+// Single-process assumption: dbfork's Engine contract is single-threaded
+// per store (see db.go's Engine doc). The sweep runs AFTER db.Close()
+// has flushed and released all goleveldb handles, so there's no race
+// with goleveldb itself. If dbfork ever grows concurrent access to the
+// same store, this sweep needs a directory lock — but the broader
+// "concurrent Get + Batch.Write" hazard would already have surfaced.
 func convertGoleveldbToSST(storeDir string) error {
 	entries, err := os.ReadDir(storeDir)
 	if err != nil {

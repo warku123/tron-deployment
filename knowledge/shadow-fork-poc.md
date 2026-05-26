@@ -249,6 +249,16 @@ native speed because slot timing is wall-clock based and consensus
 is light CPU. The 5-min observe timeout in `scripts/poc-shadow-fork
 .sh observe` may need to be bumped to ~10 minutes under qemu.
 
+If the host machine is already running a java-tron container (e.g.
+an actual mainnet fullnode), use `auto_ports: true` in the intent
+target and an explicit `resources.memory: 8GB` cap with a
+conservative `jvm.heap_max: 5g`. java-tron defaults to allocating
+its heap based on host RAM, not container limits, so an
+unconstrained second container can OOM-kill the existing tenant.
+The 2026-05-25/26 e2e runs deliberately picked alternate ports
+58090/60051/58545/58888/59527 and the 5g heap cap to coexist with a
+running mainnet fullnode on the same box without disruption.
+
 ## Phase 1 caveats
 
 - **Single witness, no finality**: the demo chain produces blocks

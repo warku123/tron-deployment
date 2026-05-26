@@ -75,15 +75,23 @@ jobs:
           echo "path=$JAR" >> "$GITHUB_OUTPUT"
           echo "Found toolkit jar at: $JAR"
 
+      - name: Compute weekly cache key
+        id: weekkey
+        # ISO week-of-year — stable across all runs in a given week,
+        # so the cache primary key actually hits. github.run_id rotates
+        # per run and would force a fresh write every time, bloating
+        # the 10 GB per-repo cache budget without ever restoring.
+        run: echo "yyyyww=$(date -u +%Y%V)" >> "$GITHUB_OUTPUT"
+
       - name: Cache Nile fixture
         id: fixture-cache
         uses: actions/cache@v4
         with:
           path: ./nile-fixture
-          # Refresh weekly; snapshot rotates daily but byte content
-          # doesn't matter for equivalence (same snapshot is used by
-          # both Go and Java, so any captured copy is fine).
-          key: nile-fixture-${{ github.run_id }}
+          # Refresh weekly. Snapshot rotates daily but byte content
+          # doesn't matter for equivalence — both Go and Java see the
+          # SAME copy, so any captured snapshot is fine for diffing.
+          key: nile-fixture-${{ steps.weekkey.outputs.yyyyww }}
           restore-keys: |
             nile-fixture-
 

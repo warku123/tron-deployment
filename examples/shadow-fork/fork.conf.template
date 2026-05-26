@@ -64,7 +64,10 @@ nextMaintenanceTime        = <NEXT_MAINTENANCE_MS>
 #   {
 #     contractAddress      = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
 #     balancesSlotPosition = 0
-#     address              = "<WITNESS_TRON_ADDRESS>"
+#     # The address to fund — replace with whatever Base58 you need
+#     # post-fork. Example value from the java toolkit's canonical
+#     # fork.conf at tron-docker/tools/toolkit/src/main/resources/.
+#     address              = "TRY18iTFy6p8yhWiCt1dhd2gz2c15ungq3"
 #     balance              = "98800000000000000"
 #   }
 # ]
