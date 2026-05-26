@@ -181,6 +181,139 @@ func TestLevelDBEngine_RoundTrip(t *testing.T) {
 	})
 }
 
+// TestLevelDBClose_RenamesLDBToSST locks down the #164 fix: after
+// Close() runs, the store dir must contain only .sst (not .ldb), and
+// none of goleveldb's .bak/.old atomic-update residue. This is what
+// makes a java-tron-format snapshot readable by leveldbjni after
+// dbfork has touched it.
+//
+// We exercise the path by:
+//
+//   1. Opening a goleveldb DB and writing+compacting so .ldb files
+//      land on disk (mirrors what mutation actually produces).
+//   2. Planting a `.bak` file by hand to simulate the residue we
+//      observed in real Nile snapshots on 2026-05-25.
+//   3. Closing via the dbfork engine wrapper and asserting the dir
+//      is in java-tron-readable shape.
+func TestLevelDBClose_RenamesLDBToSST(t *testing.T) {
+	dataDir := t.TempDir()
+	storeDir := filepath.Join(dataDir, "database", "account")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Step 1: write through goleveldb directly + compact to flush
+	// memtable to .ldb. CompactRange(nil,nil) covers the whole store.
+	seedDB, err := leveldb.OpenFile(storeDir, nil)
+	if err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	for i := range 32 {
+		k := []byte{byte(i)}
+		v := bytes.Repeat([]byte{'x'}, 4096) // make it big enough to flush
+		if err := seedDB.Put(k, v, nil); err != nil {
+			t.Fatalf("seed put: %v", err)
+		}
+	}
+	if err := seedDB.CompactRange(util.Range{}); err != nil {
+		t.Fatalf("seed compact: %v", err)
+	}
+	if err := seedDB.Close(); err != nil {
+		t.Fatalf("seed close: %v", err)
+	}
+
+	// Sanity check: the seed produced at least one .ldb file.
+	if !dirHasExt(t, storeDir, ".ldb") {
+		t.Fatal("seed did not produce any .ldb files; test premise broken")
+	}
+
+	// Step 2: plant a .bak residue file.
+	if err := os.WriteFile(filepath.Join(storeDir, "MANIFEST-000001.bak"),
+		[]byte("residue"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Step 3: open through the dbfork engine, close, assert dir state.
+	eng, err := OpenLevelDB(dataDir, "account")
+	if err != nil {
+		t.Fatalf("OpenLevelDB: %v", err)
+	}
+	if err := eng.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if dirHasExt(t, storeDir, ".ldb") {
+		t.Errorf("Close left .ldb files behind: %s", listExt(t, storeDir, ".ldb"))
+	}
+	if !dirHasExt(t, storeDir, ".sst") {
+		t.Errorf("Close did not produce any .sst files")
+	}
+	if dirHasExt(t, storeDir, ".bak") || dirHasExt(t, storeDir, ".old") {
+		t.Errorf("Close left residue: %s %s",
+			listExt(t, storeDir, ".bak"), listExt(t, storeDir, ".old"))
+	}
+}
+
+// TestConvertGoleveldbToSST_NoopWhenAlreadyClean is the boring case:
+// running the sweep on a dir that has only .sst files is a no-op
+// (does not error, does not touch files). This matters because the
+// hook runs on every Close, including the read-only opens dbfork
+// does for its equivalence-test fixtures.
+func TestConvertGoleveldbToSST_NoopWhenAlreadyClean(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "000001.sst"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "MANIFEST-000002"), []byte("m"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := convertGoleveldbToSST(dir); err != nil {
+		t.Fatalf("noop sweep errored: %v", err)
+	}
+	if !fileExists(filepath.Join(dir, "000001.sst")) {
+		t.Error("clean sweep deleted .sst file")
+	}
+	if !fileExists(filepath.Join(dir, "MANIFEST-000002")) {
+		t.Error("clean sweep deleted MANIFEST")
+	}
+}
+
+// dirHasExt returns true if storeDir has any file with the given
+// suffix. Helper for the sweep tests.
+func dirHasExt(t *testing.T, storeDir, ext string) bool {
+	t.Helper()
+	entries, err := os.ReadDir(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func listExt(t *testing.T, storeDir, ext string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ext) {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
 // TestDetectKind_LevelDB pins the engine sniffer's ability to
 // classify a real goleveldb-written store. RocksDB detection is
 // gated until the rocksdb build path lands; the dual-extension and

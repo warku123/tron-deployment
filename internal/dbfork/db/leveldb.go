@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -77,7 +78,50 @@ func (e *levelDBEngine) NewIterator() Iterator {
 }
 
 func (e *levelDBEngine) Close() error {
-	return e.db.Close()
+	if err := e.db.Close(); err != nil {
+		return fmt.Errorf("dbfork: close leveldb %s: %w", e.path, err)
+	}
+	// java-tron 4.8.x reads SST files via `org.fusesource.leveldbjni`
+	// 1.8 (and the tronprotocol fork `io.github.tronprotocol:leveldbjni
+	// -all:1.18.2`); both expect the `.sst` extension that native
+	// LevelDB used pre-2013. syndtr/goleveldb writes `.ldb` natively
+	// (the post-2013 native convention) and may rename .sst → .ldb
+	// during compaction-on-open. The SST file content is byte-identical
+	// across the two extensions — only the directory entry differs —
+	// so renaming the residue back to `.sst` produces a store java-tron
+	// can read. Also drop `.bak`/`.old` files goleveldb leaves behind
+	// from its atomic-update flow; java-tron's MANIFEST walk ignores
+	// them, but they confuse human inspection. See Task #164.
+	if err := convertGoleveldbToSST(e.path); err != nil {
+		return fmt.Errorf("dbfork: post-close ldb→sst sweep for %s: %w", e.path, err)
+	}
+	return nil
+}
+
+// convertGoleveldbToSST renames every `*.ldb` to `*.sst` and removes
+// `*.bak`/`*.old` in storeDir. The sweep is bounded to the directory's
+// immediate children (LevelDB doesn't nest); a single readdir is enough.
+func convertGoleveldbToSST(storeDir string) error {
+	entries, err := os.ReadDir(storeDir)
+	if err != nil {
+		return err
+	}
+	for _, ent := range entries {
+		name := ent.Name()
+		switch {
+		case strings.HasSuffix(name, ".ldb"):
+			old := filepath.Join(storeDir, name)
+			renamed := filepath.Join(storeDir, strings.TrimSuffix(name, ".ldb")+".sst")
+			if err := os.Rename(old, renamed); err != nil {
+				return fmt.Errorf("rename %s -> %s: %w", old, renamed, err)
+			}
+		case strings.HasSuffix(name, ".bak"), strings.HasSuffix(name, ".old"):
+			if err := os.Remove(filepath.Join(storeDir, name)); err != nil {
+				return fmt.Errorf("remove %s: %w", name, err)
+			}
+		}
+	}
+	return nil
 }
 
 // --- batch -----------------------------------------------------------------
