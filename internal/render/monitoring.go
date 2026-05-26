@@ -28,8 +28,10 @@ const monitoringComposeTmpl = `services:
       resources:
         limits:
           memory: 1g
+{{- if .PrometheusPort }}
     ports:
       - "{{.PrometheusPort}}:9090"
+{{- end }}
     volumes:
       - ./conf:/etc/prometheus
       - ./prometheus_data:/prometheus

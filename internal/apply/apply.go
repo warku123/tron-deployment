@@ -606,11 +606,14 @@ func deployMonitoring(ctx context.Context, opts Options, node *intent.NodeSpec, 
 	}
 
 	m := opts.Intent.Monitoring
+	urls := map[string]string{
+		"grafana_url": fmt.Sprintf("http://127.0.0.1:%d", m.Grafana.Port),
+	}
+	if m.Prometheus.Port > 0 {
+		urls["prometheus_url"] = fmt.Sprintf("http://127.0.0.1:%d", m.Prometheus.Port)
+	}
 	return monitoringResult{
-		urls: map[string]string{
-			"prometheus_url": fmt.Sprintf("http://127.0.0.1:%d", m.Prometheus.Port),
-			"grafana_url":    fmt.Sprintf("http://127.0.0.1:%d", m.Grafana.Port),
-		},
+		urls: urls,
 		managed: &state.MonitoringState{
 			Enabled:        true,
 			PrometheusPort: m.Prometheus.Port,

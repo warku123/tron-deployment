@@ -318,7 +318,10 @@ func ApplyMonitoringDefaults(m *Monitoring) {
 		m.Enabled = BoolPtr(false)
 	}
 	if m.Prometheus.Port == 0 {
-		m.Prometheus.Port = 9090
+		// Default to 0 (unexposed). Prometheus is reachable inside the
+		// docker network by Grafana; external access is opt-in via an
+		// explicit port in the intent.
+		m.Prometheus.Port = 0
 	}
 	if m.Grafana.Port == 0 {
 		m.Grafana.Port = 3000

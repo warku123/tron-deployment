@@ -322,11 +322,14 @@ func findTemplatesDir() string {
 			return monitoringResult{error: err.Error()}
 		}
 
+		urls := map[string]string{
+			"grafana_url": fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Grafana.Port),
+		}
+		if parsed.Monitoring.Prometheus.Port > 0 {
+			urls["prometheus_url"] = fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Prometheus.Port)
+		}
 		return monitoringResult{
-			urls: map[string]string{
-				"prometheus_url": fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Prometheus.Port),
-				"grafana_url":    fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Grafana.Port),
-			},
+			urls: urls,
 		}
 	}
 
