@@ -222,6 +222,33 @@ where java-tron force-switches the engine. The May 2026 amd64 e2e
 attempt confirmed this gap empirically; #166 captures the rationale
 in detail.
 
+**Validating RocksDB on amd64 hardware via qemu emulation.** If you
+need to exercise the `apply` phase end-to-end without provisioning
+arm64 hardware, the arm64 java-tron container runs under qemu on
+amd64 hosts. The 2026-05-26 RocksDB e2e validated #166 via this
+path. Two gotchas worth knowing about:
+
+```bash
+# 1) Register the arm64 binfmt handler. Docker-native (no apt sudo).
+docker run --privileged --rm tonistiigi/binfmt --install arm64
+
+# 2) docker run --platform linux/arm64 does NOT auto-pull the arm64
+#    variant of a multi-arch image when the amd64 variant is already
+#    cached locally. Explicitly pull arm64 first:
+docker pull --platform linux/arm64 tronprotocol/java-tron:GreatVoyage-v4.8.1
+
+# 3) Apply with DOCKER_DEFAULT_PLATFORM. trond's compose render does
+#    not yet have a platform field; the env var propagates through.
+DOCKER_DEFAULT_PLATFORM=linux/arm64 trond apply --intent <intent>.yaml
+```
+
+Qemu emulation is roughly 5× slower than native arm64 hardware
+during boot (the May 26 run took ~4 minutes for the first block,
+vs ~30s on native). Steady-state block production is closer to
+native speed because slot timing is wall-clock based and consensus
+is light CPU. The 5-min observe timeout in `scripts/poc-shadow-fork
+.sh observe` may need to be bumped to ~10 minutes under qemu.
+
 ## Phase 1 caveats
 
 - **Single witness, no finality**: the demo chain produces blocks
