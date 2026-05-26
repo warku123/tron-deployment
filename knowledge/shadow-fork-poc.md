@@ -189,12 +189,18 @@ the default LevelDB build.
 A RocksDB-format Nile snapshot exists at
 `snapshots.nileex.io/rocksdb/backup<date>/FullNode_output-directory.tgz`
 and dbfork's RocksDB engine is implemented via grocksdb under the
-`rocksdb` build tag. See `internal/dbfork/db/rocksdb_enabled.go` for
-the full build prereqs — short version, grocksdb v1.10.8 is hard-
-coupled to RocksDB 10.10.1, so build via the bundled script:
+`rocksdb` build tag.
+
+**Version pin matters.** grocksdb is pinned to v1.9.7 (wraps RocksDB
+9.7.3) to match java-tron 4.8.1's arm64 RocksDB 9.7.4. Anything past
+v1.9.x writes MANIFEST entries with VersionEdit tags java-tron's
+older rocksdbjni cannot parse, surfacing as `RocksDBException:
+VersionEdit: unknown tag` at AccountStore init. See Task #166 for the
+empirical trace from 2026-05-26 — we got bitten by exactly this when
+v1.10.8 was the default.
 
 ```bash
-GROCKSDB=$(go env GOMODCACHE)/github.com/linx!gnu/grocksdb@v1.10.8
+GROCKSDB=$(go env GOMODCACHE)/github.com/linx!gnu/grocksdb@v1.9.7
 cd "$GROCKSDB" && make libs   # ~10-15 min, builds RocksDB + deps statically
 
 cd /path/to/tron-deployment
@@ -207,6 +213,14 @@ Then point trond at the RocksDB snapshot the same way as LevelDB —
 DetectKind reads java-tron's per-store `engine.properties` and routes
 automatically. Release-binary support (CI, goreleaser, cross-compile)
 is tracked in Task #163.
+
+**RocksDB is arm64-only in dbfork.** java-tron's amd64 build pins
+RocksDB to 5.15.10 (2018) — no Go binding (grocksdb or otherwise)
+wraps RocksDB 5.x. amd64 operators must use the default LevelDB
+build of trond; the `-tags rocksdb` path is exclusively for arm64
+where java-tron force-switches the engine. The May 2026 amd64 e2e
+attempt confirmed this gap empirically; #166 captures the rationale
+in detail.
 
 ## Phase 1 caveats
 

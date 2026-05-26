@@ -7,7 +7,7 @@ toolchain go1.25.9
 require (
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/gurkankaymak/hocon v1.2.23
-	github.com/linxGnu/grocksdb v1.10.8
+	github.com/linxGnu/grocksdb v1.9.7
 	github.com/modelcontextprotocol/go-sdk v1.6.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/cobra v1.10.2

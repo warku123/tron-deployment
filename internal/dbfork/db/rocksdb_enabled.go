@@ -12,31 +12,64 @@ import (
 
 // OpenRocksDB is the cgo-backed RocksDB engine path, enabled by
 // building with `-tags rocksdb`. Required for arm64 hosts (java-tron's
-// Storage.java:180 forces RocksDB on arm64 regardless of config) and
-// for any operator running java-tron with `storage.db.engine = ROCKSDB`.
+// Storage.java:180 force-switches to RocksDB on arm64 regardless of
+// `storage.db.engine` config).
+//
+// # Version pinning — same RocksDB major as java-tron arm64
+//
+// grocksdb is pinned to v1.9.7, which wraps RocksDB 9.7.3. This
+// matches java-tron 4.8.1's arm64 RocksDB 9.7.4 (per build.gradle's
+// `isArm64 ? '9.7.4' : '5.15.10'`) so dbfork's MANIFEST writes use
+// VersionEdit tags the running java-tron's rocksdbjni can parse.
+//
+// Don't bump grocksdb past v1.9.x without first checking what java-
+// tron's arm64 rocksdbjni line is pinned to. Cross-major drift
+// surfaces as `RocksDBException: VersionEdit: unknown tag` at
+// java-tron's AccountStore init — see Task #166 for the empirical
+// trace (we got bitten by this in May 2026 when v1.10.8 + RocksDB
+// 10.10.1 was the default and amd64 java-tron rejected the snapshot).
+//
+// # AMD64 caveat — dbfork's RocksDB path is not supported there
+//
+// java-tron 4.8.1 amd64 pins to RocksDB 5.15.10 (2018). No tagged
+// grocksdb release wraps RocksDB 5.x — the oldest tag (v1.6.48) is
+// already RocksDB 6.29.3. There is no practical Go binding to RocksDB
+// 5.15.10, so dbfork cannot produce an amd64-compatible mutated
+// RocksDB snapshot without a custom binding or a java-tron upstream
+// version bump.
+//
+// In practice this is a thin gap: amd64 java-tron defaults to LevelDB,
+// so an amd64 operator using `storage.db.engine = ROCKSDB` is doing
+// something unusual on purpose. amd64 operators should use the
+// default LevelDB build of trond. The arm64 path is the production
+// use case for this engine.
 //
 // # Validation status
 //
-// Runtime-validated on linux/arm64 against grocksdb v1.10.8 +
-// RocksDB 10.10.1 built via `make libs`. The rocksdb-tagged test
-// suite (TestRocksDBEngine_RoundTrip + TestDetectKind_RocksDB)
-// passes; a synthetic shadow-fork mutate against an empty
-// RocksDB-flavoured data dir produces the same Result counters
-// as the LevelDB path (1 witness, 1 active slate, 1 account, 3
-// properties) and the on-disk state read-back matches what the
-// mutation engine writes via the Batch interface. Wiring this
-// into CI is still Task #163.
+// Engine-correct on linux/arm64 via the rocksdb-tagged test suite
+// (TestRocksDBEngine_RoundTrip + TestDetectKind_RocksDB) and a
+// synthetic shadow-fork mutate against an empty store — counters
+// matched the LevelDB path and on-disk bytes read back correctly
+// (last run May 25 2026 with the PRIOR grocksdb v1.10.8 pin).
+//
+// NOT YET RUNTIME-REVALIDATED against the current v1.9.7 (RocksDB
+// 9.7.3) pin on arm64 hardware. The wrapper code is engine-version-
+// agnostic (only the linked librocksdb changes), but a follow-up
+// arm64 e2e against real java-tron 4.8.1 is required before the
+// path can be declared release-ready (Task #166 closeout). The
+// May 26 2026 e2e attempt on amd64 EC2 hit the version-mismatch
+// crash this pin is meant to fix.
 //
 // # Build prerequisites
 //
-// grocksdb v1.10.8 (the pinned version in go.mod) is hard-coupled to
-// RocksDB 10.10.1 — neither Ubuntu apt (6.x-8.x) nor Homebrew (11.x)
-// ship a compatible version. The recommended workflow uses grocksdb's
-// bundled build script which compiles RocksDB 10.10.1 + deps (snappy,
-// zlib, lz4, zstd) from source as static libs:
+// grocksdb v1.9.7 (the pinned version in go.mod) is coupled to RocksDB
+// 9.7.3 — neither Ubuntu apt nor Homebrew ship a matching version.
+// The recommended workflow uses grocksdb's bundled build script which
+// compiles RocksDB 9.7.3 + deps (snappy, zlib, lz4, zstd) from source
+// as static libs:
 //
 //	# Build the deps (~10-15 min, one-time per machine).
-//	GROCKSDB=$(go env GOMODCACHE)/github.com/linx!gnu/grocksdb@v1.10.8
+//	GROCKSDB=$(go env GOMODCACHE)/github.com/linx!gnu/grocksdb@v1.9.7
 //	cd "$GROCKSDB" && make libs
 //
 //	# Build trond with the rocksdb tag.
@@ -46,8 +79,8 @@ import (
 //	go build -tags rocksdb -o bin/trond-rocksdb .
 //
 // Wiring this into the project's CI + goreleaser pipelines is tracked
-// under Task #162 follow-up — for now the rocksdb-tagged build is an
-// operator-driven workflow, not a default release artifact.
+// under Task #163 — for now the rocksdb-tagged build is an operator-
+// driven workflow, not a default release artifact.
 //
 // Common troubleshooting: if cgo errors with `'rocksdb/c.h' file not
 // found`, the CGO_CFLAGS path is wrong (typo in $GROCKSDB, or `make
