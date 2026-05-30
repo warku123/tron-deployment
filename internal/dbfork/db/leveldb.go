@@ -114,6 +114,14 @@ func convertGoleveldbToSST(storeDir string) error {
 		return err
 	}
 	for _, ent := range entries {
+		// Only ever touch regular files. goleveldb + java-tron's leveldb
+		// write table/residue files, never directories with these
+		// suffixes — so a dir named e.g. `x.ldb` is something else
+		// entirely (operator mistake, nested mount) and must not be
+		// renamed or removed by a blind suffix match.
+		if ent.IsDir() {
+			continue
+		}
 		name := ent.Name()
 		switch {
 		case strings.HasSuffix(name, ".ldb"):

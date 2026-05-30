@@ -2,12 +2,15 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tronprotocol/tron-deployment/internal/dbfork"
+	"github.com/tronprotocol/tron-deployment/internal/output"
 )
 
 // registerShadowforkTools exposes the dbfork mutation engine as an
@@ -46,21 +49,30 @@ PREREQ: the node owning the data_dir must be stopped (leveldb locks). Verify via
 }
 
 func shadowforkMutateTool(_ context.Context, _ *mcp.CallToolRequest, args shadowforkMutateArgs) (*mcp.CallToolResult, any, error) {
+	// Return typed *output.StructuredError envelopes (error_code +
+	// exit_code + suggestions[]) mirroring cmd/shadowfork/mutate.go, so
+	// an MCP agent sees the SAME contract as the CLI's --output json.
+	// Bare fmt.Errorf here would collapse every failure to
+	// INTERNAL_ERROR/exit 1 (envelopeFromError's fallback), diverging
+	// from the CLI's CONFIG_LOAD_ERROR/exit 2 + os.ErrNotExist split and
+	// dropping the agent-actionable error_code.
 	if args.DataDir == "" {
-		return errResult(fmt.Errorf("data_dir is required"))
+		return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError,
+			"data_dir is required"))
 	}
 	if args.ConfigPath == "" {
-		return errResult(fmt.Errorf("config_path is required"))
+		return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError,
+			"config_path is required"))
 	}
 
 	format, err := parseShadowforkFormat(args.Format)
 	if err != nil {
-		return errResult(err)
+		return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error()))
 	}
 
 	cfg, err := dbfork.LoadConfig(args.ConfigPath, format)
 	if err != nil {
-		return errResult(fmt.Errorf("load fork.conf: %w", err))
+		return errResult(output.NewError("CONFIG_LOAD_ERROR", output.ExitValidationError, err.Error()))
 	}
 	// Resolve format for the output report so MCP agents see the
 	// concrete value ("hocon" / "yaml") rather than the literal input.
@@ -72,7 +84,13 @@ func shadowforkMutateTool(_ context.Context, _ *mcp.CallToolRequest, args shadow
 		RetainWitnesses: args.RetainWitnesses,
 	})
 	if err != nil {
-		return errResult(fmt.Errorf("apply: %w", err))
+		// Same os.ErrNotExist -> exit 2 (wrong data dir) vs exit 1
+		// (internal engine error) split as cmd/shadowfork/mutate.go.
+		exit := output.ExitGeneralError
+		if errors.Is(err, os.ErrNotExist) {
+			exit = output.ExitValidationError
+		}
+		return errResult(output.NewError("APPLY_ERROR", exit, err.Error()))
 	}
 
 	// Output shape matches schemas/output/shadow-fork-mutate.schema.json

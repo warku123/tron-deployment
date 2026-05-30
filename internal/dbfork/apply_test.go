@@ -272,20 +272,27 @@ func TestApply_EndToEnd_Accounts(t *testing.T) {
 //
 // We inject a deterministic sweep failure: plant a NON-EMPTY directory
 // named "*.old" in a store Apply opens. convertGoleveldbToSST removes
-// *.old via os.Remove (not RemoveAll), which fails with "directory not
-// empty" — exactly the class of post-commit filesystem failure (ENOSPC,
-// EACCES, a held-open file) the fix must surface rather than swallow.
+// .ldb rename target as a NON-EMPTY directory, so os.Rename fails —
+// exactly the class of post-commit filesystem failure (ENOSPC, EACCES,
+// a held-open file) the fix must surface rather than swallow.
 func TestApply_SweepFailureSurfacesAsError(t *testing.T) {
 	dataDir := seedLevelDBStore(t, stores.WitnessStore)
 	seedLevelDBStoreUnder(t, dataDir, stores.WitnessScheduleStore)
 	seedLevelDBStoreUnder(t, dataDir, stores.DynamicPropertiesStore)
 	compactAllStores(t, dataDir)
 
-	// Plant a non-empty "<n>.old" directory in the witness store dir so
-	// the post-close sweep's os.Remove fails. The witness store IS
+	// Make the post-close sweep's os.Rename fail deterministically: plant
+	// a regular file "poison.ldb" whose rename target "poison.sst" already
+	// exists as a NON-EMPTY directory. convertGoleveldbToSST processes the
+	// .ldb file and os.Rename(poison.ldb, poison.sst) fails because the
+	// target is a non-empty directory. This injection survives the
+	// dir-skip guard (the .ldb itself is a file). The witness store IS
 	// opened because the config below lists a witness.
-	poison := filepath.Join(dataDir, "database", stores.WitnessStore, "poison.old")
-	if err := os.MkdirAll(filepath.Join(poison, "child"), 0o755); err != nil {
+	wDir := filepath.Join(dataDir, "database", stores.WitnessStore)
+	if err := os.WriteFile(filepath.Join(wDir, "poison.ldb"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(wDir, "poison.sst", "child"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
