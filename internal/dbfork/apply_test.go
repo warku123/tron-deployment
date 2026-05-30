@@ -262,3 +262,43 @@ func TestApply_EndToEnd_Accounts(t *testing.T) {
 		t.Errorf("AccountName = %q; want wired", got.AccountName)
 	}
 }
+
+// TestApply_SweepFailureSurfacesAsError locks the fix for the HIGH
+// review finding: Apply used to discard every Engine.Close() error via
+// `defer func() { _ = eng.Close() }()`, so a failed #164 .ldb->.sst
+// sweep would leave an unbootable store on disk while Apply reported
+// success. Apply now uses a named return + closeStore() that promotes
+// the first close error.
+//
+// We inject a deterministic sweep failure: plant a NON-EMPTY directory
+// named "*.old" in a store Apply opens. convertGoleveldbToSST removes
+// *.old via os.Remove (not RemoveAll), which fails with "directory not
+// empty" — exactly the class of post-commit filesystem failure (ENOSPC,
+// EACCES, a held-open file) the fix must surface rather than swallow.
+func TestApply_SweepFailureSurfacesAsError(t *testing.T) {
+	dataDir := seedLevelDBStore(t, stores.WitnessStore)
+	seedLevelDBStoreUnder(t, dataDir, stores.WitnessScheduleStore)
+	seedLevelDBStoreUnder(t, dataDir, stores.DynamicPropertiesStore)
+	compactAllStores(t, dataDir)
+
+	// Plant a non-empty "<n>.old" directory in the witness store dir so
+	// the post-close sweep's os.Remove fails. The witness store IS
+	// opened because the config below lists a witness.
+	poison := filepath.Join(dataDir, "database", stores.WitnessStore, "poison.old")
+	if err := os.MkdirAll(filepath.Join(poison, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	addr, _ := makeAddress(t, [20]byte{0x42})
+	res, err := Apply(dataDir, &Config{
+		Witnesses: []WitnessSpec{{Address: addr, VoteCount: 1000}},
+	}, Options{})
+
+	if err == nil {
+		t.Fatalf("Apply returned nil error despite a failed .ldb->.sst sweep; "+
+			"a corrupt store was reported as success (res=%+v)", res)
+	}
+	if !strings.Contains(err.Error(), "sweep") {
+		t.Errorf("error should identify the post-close sweep failure, got: %v", err)
+	}
+}

@@ -114,7 +114,18 @@ type Result struct {
 // DryRun (Task #150): walks the mutation plan and counts what
 // WOULD change without writing. Not yet implemented; Apply errors
 // when opts.DryRun is true.
-func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
+// The return is named so the deferred Engine.Close() calls can
+// surface a sweep failure. levelDBEngine.Close() runs the #164
+// .ldb->.sst rename + .bak/.old cleanup, which is the most
+// failure-prone step (os.Rename/os.Remove against ENOSPC, EACCES,
+// EROFS, a transient I/O error, or a host indexer holding a file
+// open). If a close fails AFTER the mutation batch already committed,
+// the store is left with .ldb table files java-tron's leveldbjni
+// cannot read — exactly the corruption #164 exists to prevent. We
+// MUST turn that into a hard error rather than report success, so
+// each defer promotes the first close error into the return when no
+// mutation error already occurred.
+func Apply(dataDir string, cfg *Config, opts Options) (res *Result, err error) {
 	if cfg == nil {
 		return nil, errors.New("dbfork: nil config")
 	}
@@ -137,7 +148,18 @@ func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
 			dataDir, err)
 	}
 
-	res := &Result{}
+	res = &Result{}
+
+	// closeStore promotes a close (incl. the #164 sweep) failure into
+	// the named err return — but only when no earlier mutation error
+	// already set it, so the original cause wins. A bare
+	// `defer eng.Close()` would silently discard a sweep failure and
+	// leave Apply reporting success on an unbootable store.
+	closeStore := func(eng db.Engine) {
+		if cerr := eng.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
 
 	// openStore probes the on-disk engine + opens one store. Each
 	// java-tron store is a separate LevelDB instance under
@@ -174,12 +196,12 @@ func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = witnessEng.Close() }()
+		defer closeStore(witnessEng)
 		scheduleEng, err := openStore(stores.WitnessScheduleStore)
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = scheduleEng.Close() }()
+		defer closeStore(scheduleEng)
 		written, active, err := MutateWitnesses(witnessEng, scheduleEng,
 			cfg.Witnesses, opts.RetainWitnesses)
 		if err != nil {
@@ -198,17 +220,17 @@ func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = accountEng.Close() }()
+		defer closeStore(accountEng)
 		accountAssetEng, err := openStore(stores.AccountAssetStore)
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = accountAssetEng.Close() }()
+		defer closeStore(accountAssetEng)
 		assetIssueV2Eng, err := openStore(stores.AssetIssueV2Store)
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = assetIssueV2Eng.Close() }()
+		defer closeStore(assetIssueV2Eng)
 		modified, err := MutateAccounts(accountEng, accountAssetEng,
 			assetIssueV2Eng, cfg.Accounts)
 		if err != nil {
@@ -225,12 +247,12 @@ func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = contractEng.Close() }()
+		defer closeStore(contractEng)
 		storageRowEng, err := openStore(stores.StorageRowStore)
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = storageRowEng.Close() }()
+		defer closeStore(storageRowEng)
 		updated, err := MutateTRC20Contracts(contractEng, storageRowEng,
 			cfg.TRC20Contracts)
 		if err != nil {
@@ -247,7 +269,7 @@ func Apply(dataDir string, cfg *Config, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer func() { _ = propsEng.Close() }()
+		defer closeStore(propsEng)
 		written, err := MutateProperties(propsEng, cfg.Properties)
 		if err != nil {
 			return nil, err
