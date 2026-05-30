@@ -261,10 +261,14 @@ func Apply(dataDir string, cfg *Config, opts Options) (res *Result, err error) {
 		res.TRC20SlotsUpdated = updated
 	}
 
-	// DynamicProperties — only touch if at least one field is non-zero.
-	if cfg.Properties.LatestBlockHeaderTimestamp != 0 ||
-		cfg.Properties.MaintenanceTimeInterval != 0 ||
-		cfg.Properties.NextMaintenanceTime != 0 {
+	// DynamicProperties — only touch if at least one field is > 0.
+	// Matches both java DbFork's per-field `> 0` gate and
+	// MutateProperties' write gate, so the open-gate and the
+	// write-gate agree (a properties block of only negative/zero
+	// values is a true no-op and never opens the store).
+	if cfg.Properties.LatestBlockHeaderTimestamp > 0 ||
+		cfg.Properties.MaintenanceTimeInterval > 0 ||
+		cfg.Properties.NextMaintenanceTime > 0 {
 		propsEng, err := openStore(stores.DynamicPropertiesStore)
 		if err != nil {
 			return nil, err

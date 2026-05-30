@@ -3,6 +3,7 @@ package dbfork
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"github.com/tronprotocol/tron-deployment/internal/dbfork/db"
@@ -115,6 +116,40 @@ func TestMutateProperties_AllZeroNoOp(t *testing.T) {
 	}
 	if !bytes.Equal(v, []byte("seed")) {
 		t.Errorf("__seed__ value mutated: %q", v)
+	}
+}
+
+// TestMutateProperties_NegativeSkipped pins java parity: a negative
+// timing value is skipped, not written. java DbFork gates each field
+// on `getLong(X) > 0` (DbFork.java:373/384/395); an earlier Go `!= 0`
+// gate would have written a negative as a 0xFFFF…-encoded long, both
+// corrupting the property and diverging byte-for-byte from java.
+func TestMutateProperties_NegativeSkipped(t *testing.T) {
+	dataDir := seedLevelDBStore(t, stores.DynamicPropertiesStore)
+	eng, err := db.OpenLevelDB(dataDir, stores.DynamicPropertiesStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// One valid (>0) field, two negative ones — only the valid one writes.
+	n, err := MutateProperties(eng, PropertiesSpec{
+		LatestBlockHeaderTimestamp: 1_700_000_000_000,
+		MaintenanceTimeInterval:    -1,
+		NextMaintenanceTime:        -21_600_000,
+	})
+	if err != nil {
+		t.Fatalf("MutateProperties: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("written = %d; want 1 (negatives skipped, only the >0 field written)", n)
+	}
+	// The negative fields must be absent, not written as 0xFFFF… longs.
+	if _, err := eng.Get([]byte(stores.KeyMaintenanceTimeInterval)); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("negative MaintenanceTimeInterval should be absent; got err=%v", err)
+	}
+	if _, err := eng.Get([]byte(stores.KeyNextMaintenanceTime)); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("negative NextMaintenanceTime should be absent; got err=%v", err)
 	}
 }
 

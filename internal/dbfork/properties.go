@@ -41,8 +41,10 @@ type PropertiesSpec struct {
 	NextMaintenanceTime int64 `yaml:"nextMaintenanceTime"`
 }
 
-// MutateProperties writes any non-zero PropertiesSpec field into
-// the DynamicPropertiesStore. java-tron encodes longs as big-endian
+// MutateProperties writes any strictly-positive PropertiesSpec field
+// into the DynamicPropertiesStore (gating on `> 0` to match java
+// DbFork; negative/zero values are skipped, never written).
+// java-tron encodes longs as big-endian
 // 8-byte sequences (Guava's `Longs.toByteArray`) — we match exactly
 // via `binary.BigEndian.PutUint64`.
 //
@@ -62,13 +64,20 @@ func MutateProperties(propsEng db.Engine, spec PropertiesSpec) (written int, err
 		written++
 	}
 
-	if spec.LatestBlockHeaderTimestamp != 0 {
+	// Gate on `> 0`, NOT `!= 0`, to match java DbFork exactly
+	// (DbFork.java:373/384/395 each guard `hasPath(X) && getLong(X) > 0`).
+	// These are epoch-millis / interval-millis values where a negative
+	// is only ever a typo or an underflow; java skips it, and writing
+	// it on the Go side would produce a 0xFFFF…-encoded long that
+	// decodes as a perpetually-past-due timestamp AND diverges byte-for-
+	// byte from java's output (failing the equivalence gate).
+	if spec.LatestBlockHeaderTimestamp > 0 {
 		putLong(stores.KeyLatestBlockHeaderTimestamp, spec.LatestBlockHeaderTimestamp)
 	}
-	if spec.MaintenanceTimeInterval != 0 {
+	if spec.MaintenanceTimeInterval > 0 {
 		putLong(stores.KeyMaintenanceTimeInterval, spec.MaintenanceTimeInterval)
 	}
-	if spec.NextMaintenanceTime != 0 {
+	if spec.NextMaintenanceTime > 0 {
 		putLong(stores.KeyNextMaintenanceTime, spec.NextMaintenanceTime)
 	}
 
