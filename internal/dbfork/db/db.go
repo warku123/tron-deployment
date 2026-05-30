@@ -10,7 +10,8 @@
 //   - rocksdb_disabled.go     //go:build !rocksdb — returns a friendly
 //     "rebuild with -tags rocksdb" error
 //   - rocksdb_enabled.go      //go:build rocksdb — cgo wrapper around
-//     linxGnu/grocksdb v1.10.8
+//     linxGnu/grocksdb v1.9.7 (RocksDB 9.7.3; pinned to match
+//     java-tron arm64's rocksdbjni 9.7.4 — see #166)
 //
 // Build matrix:
 //
