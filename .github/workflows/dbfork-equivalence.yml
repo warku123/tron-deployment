@@ -21,10 +21,12 @@ on:
     branches: [master, develop]
     paths:
       - 'internal/dbfork/**'
+      - 'internal/snapshot/**'
       - '.github/workflows/dbfork-equivalence.yml'
   pull_request:
     paths:
       - 'internal/dbfork/**'
+      - 'internal/snapshot/**'
       - '.github/workflows/dbfork-equivalence.yml'
   schedule:
     # Weekly catch — surfaces snapshot-format drift (java DbFork
@@ -79,8 +81,12 @@ jobs:
         with:
           repository: tronprotocol/tron-docker
           path: tron-docker
-          ref: main  # follows tron-docker's release cadence; pin a SHA
-                    # here if the toolkit ever ships a breaking change
+          # Pinned to a SHA for a reproducible reference implementation:
+          # a floating `main` could change DbFork's output mid-flight and
+          # turn the equivalence gate red (or, worse, green against a
+          # changed reference) without any change to this repo. Bump
+          # deliberately when adopting a new java DbFork behaviour.
+          ref: d89d353b06d1f5016d91b02654508eeecdf5a904  # tron-docker main @ 2026-05-27
 
       - name: Build java DbFork toolkit
         # tron-docker's tools/ is a multi-project gradle build. The
@@ -96,11 +102,22 @@ jobs:
 
       - name: Resolve toolkit jar path
         id: jar
-        # shadowJar emits both Toolkit-x.y.z.jar and Toolkit-x.y.z-all
-        # .jar; we want the -all (fat) one so java -jar finds bundled
-        # deps. Glob covers any version tag.
+        # The toolkit build.gradle sets archiveBaseName='Toolkit' +
+        # archiveClassifier='' with no version, so shadowJar emits a
+        # single fat jar named exactly `Toolkit.jar` (NOT the shadow-
+        # plugin default `Toolkit-<ver>-all.jar`). An earlier glob of
+        # `Toolkit*-all.jar` matched nothing, left this output empty,
+        # and the empty DBFORK_JAVA_TOOLKIT resolved to a directory ->
+        # the test SKIPPED and the job passed vacuously. Fail loudly if
+        # the artifact name ever changes again.
         run: |
-          JAR=$(ls tron-docker/tools/toolkit/build/libs/Toolkit*-all.jar | head -1)
+          set -euo pipefail
+          JAR=tron-docker/tools/toolkit/build/libs/Toolkit.jar
+          if [ ! -f "$JAR" ]; then
+            echo "::error::toolkit jar not found at $JAR — did the shadowJar artifact name change?"
+            ls -la tron-docker/tools/toolkit/build/libs/ || true
+            exit 1
+          fi
           echo "path=$JAR" >> "$GITHUB_OUTPUT"
           echo "Found toolkit jar at: $JAR"
 
@@ -127,13 +144,18 @@ jobs:
       - name: Build trond + download Nile fixture (if cache miss)
         if: steps.fixture-cache.outputs.cache-hit != 'true'
         run: |
+          set -euo pipefail
           go build -o bin/trond ./
           ./bin/trond snapshot download \
             --network nile --type lite \
             --to ./nile-fixture
-          # Drop the .tgz tarball; only the extracted output-directory
-          # is referenced by the equivalence test.
-          find ./nile-fixture -name "*.tgz" -delete
+          # snapshot download streams gunzip|tar straight to disk and
+          # never persists the .tgz, so there is nothing to clean up
+          # here. Guard that the extracted layout the test expects
+          # actually materialised, so a future download-format change
+          # fails here instead of as a confusing SKIP downstream.
+          test -d ./nile-fixture/output-directory/database \
+            || { echo "::error::fixture missing output-directory/database after download"; exit 1; }
 
       - name: Run equivalence test
         env:
@@ -142,7 +164,25 @@ jobs:
           DBFORK_FORK_CONF: ${{ github.workspace }}/tron-docker/tools/toolkit/src/main/resources/fork.conf
           DBFORK_JAVA_HEAP: "4g"
         run: |
-          go test -v -timeout 30m -run TestEquivalence_GoVsJava ./internal/dbfork/
+          set -euo pipefail
+          # TestEquivalence_GoVsJava SKIPs (does not fail) when its env
+          # prereqs are missing — that keeps local `go test ./...` green
+          # for devs without the toolkit. But in THIS workflow a skip
+          # means the release gate didn't actually run, which previously
+          # passed vacuously. Capture the output and hard-fail on SKIP so
+          # the gate can never be silently hollow again.
+          go test -v -timeout 30m -run TestEquivalence_GoVsJava ./internal/dbfork/ 2>&1 | tee equivalence.out
+          if grep -q -- "--- SKIP: TestEquivalence_GoVsJava" equivalence.out; then
+            echo "::error::equivalence test SKIPPED — env prereqs (fixture / toolkit jar / fork.conf) not satisfied; the gate did not run"
+            exit 1
+          fi
+          # Also assert the per-store diff actually executed (diffStore
+          # logs "<store>: N keys on Go, M keys on Java"); its absence
+          # means the run was hollow even if it didn't formally SKIP.
+          if ! grep -q "keys on Go" equivalence.out; then
+            echo "::error::equivalence test produced no per-store diff output — run was hollow"
+            exit 1
+          fi
 
       - name: Upload diff log on failure
         if: failure()
@@ -150,7 +190,7 @@ jobs:
         with:
           name: equivalence-failure-log
           path: |
-            **/test.log
+            equivalence.out
             tron-docker/tools/toolkit/build/logs/
           retention-days: 14
           if-no-files-found: ignore
