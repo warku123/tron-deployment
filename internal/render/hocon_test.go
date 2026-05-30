@@ -197,6 +197,74 @@ func TestRenderHOCON_MetricsPort(t *testing.T) {
 	}
 }
 
+// prometheusBlock extracts the `prometheus { ... }` sub-block from a
+// rendered config so assertions can be scoped to it (the full config
+// has many unrelated enable = false lines).
+func prometheusBlock(t *testing.T, config string) string {
+	t.Helper()
+	lines := strings.Split(config, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "prometheus") && strings.Contains(l, "{") {
+			for j := i + 1; j < len(lines); j++ {
+				if strings.TrimSpace(lines[j]) == "}" {
+					return strings.Join(lines[i:j+1], "\n")
+				}
+			}
+		}
+	}
+	t.Fatalf("no prometheus block found in rendered config")
+	return ""
+}
+
+// TestRenderHOCON_MetricsFeatureEnables locks the metrics-enable fix
+// (symmetric to #165): features.metrics=true must flip the mainnet
+// template's prometheus.enable from false to true, otherwise the bound
+// docker port serves nothing. Also asserts the Nile template (no
+// prometheus block, #167) is a safe no-op — render must not corrupt it.
+func TestRenderHOCON_MetricsFeatureEnables(t *testing.T) {
+	enabled := true
+
+	t.Run("mainnet flips enable=true", func(t *testing.T) {
+		out, err := RenderHOCON("", &intent.Intent{
+			Name: "m", Network: "mainnet", Target: intent.Target{Type: "local"},
+		}, &intent.NodeSpec{
+			Type:     "fullnode",
+			Features: intent.Features{Metrics: &enabled},
+			Ports:    intent.PortMapping{Metrics: 59527},
+		})
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		// Scope the assertion to the prometheus block specifically — the
+		// mainnet config has several other `enable = false` lines
+		// (influxdb, other features) that this fix must NOT touch.
+		prom := prometheusBlock(t, out)
+		if !strings.Contains(prom, "enable = true") {
+			t.Errorf("prometheus.enable not flipped to true; block was:\n%s", prom)
+		}
+		if strings.Contains(prom, "enable = false") {
+			t.Errorf("prometheus.enable left as false despite features.metrics=true; block:\n%s", prom)
+		}
+	})
+
+	t.Run("nile no prometheus block is a safe no-op", func(t *testing.T) {
+		out, err := RenderHOCON("", &intent.Intent{
+			Name: "m", Network: "nile", Target: intent.Target{Type: "local"},
+		}, &intent.NodeSpec{
+			Type:     "fullnode",
+			Features: intent.Features{Metrics: &enabled},
+		})
+		if err != nil {
+			t.Fatalf("render nile: %v", err)
+		}
+		// Nile template has no prometheus block; render must not have
+		// synthesised a stray `enable = true` line.
+		if strings.Contains(out, "prometheus") {
+			t.Error("nile render unexpectedly contains a prometheus block")
+		}
+	})
+}
+
 func TestRenderHOCON_UnknownNetwork(t *testing.T) {
 	i := &intent.Intent{Network: "martian"}
 	node := &intent.NodeSpec{Type: "fullnode"}

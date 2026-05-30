@@ -242,6 +242,13 @@ func applyFeatureOverrides(config string, node *intent.NodeSpec) string {
 		config = ensureJSONRPCEnabled(config)
 	}
 
+	if features.Metrics != nil && *features.Metrics {
+		// Ensure node.metrics.prometheus.enable = true so the bound
+		// metrics port actually serves data (symmetric to JSONRPC).
+		// No-op on templates without a prometheus block (Nile/private).
+		config = ensureMetricsEnabled(config)
+	}
+
 	return config
 }
 
@@ -382,6 +389,56 @@ func replaceMetricsPort(config string, port int) string {
 		}
 		if depth == 0 {
 			break // exited node.metrics entirely
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ensureMetricsEnabled sets node.metrics.prometheus.enable = true so a
+// rendered `features.metrics: true` actually serves metrics. Without
+// this, applyFeatureOverrides wired only JSONRPC and left the template's
+// `enable = false` intact — so compose.go bound the metrics port while
+// java-tron published nothing on it. That's the exact symmetric bug
+// #165 fixed for jsonrpc.
+//
+// Same brace-depth walk as replaceMetricsPort. SAFE NO-OP when there is
+// no prometheus block (the Nile/private templates lack one, tracked as
+// #167) — returns the config unchanged rather than synthesising a block,
+// so it never corrupts a template that doesn't support metrics.
+func ensureMetricsEnabled(config string) string {
+	lines := strings.Split(config, "\n")
+	depth := 0
+	prometheus := false
+	prometheusDepth := -1
+	inMetrics := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inMetrics {
+			if strings.HasPrefix(trimmed, "node.metrics") && strings.Contains(trimmed, "{") {
+				inMetrics = true
+				depth = 1
+			}
+			continue
+		}
+		opens := strings.Count(line, "{")
+		closes := strings.Count(line, "}")
+		preDepth := depth
+		depth += opens - closes
+		if !prometheus && strings.HasPrefix(trimmed, "prometheus") && opens > 0 {
+			prometheus = true
+			prometheusDepth = preDepth + 1
+			continue
+		}
+		if prometheus && depth >= prometheusDepth && strings.HasPrefix(trimmed, "enable") {
+			lines[i] = fmt.Sprintf("%senable = true", lineIndent(line))
+			return strings.Join(lines, "\n")
+		}
+		if prometheus && depth < prometheusDepth {
+			prometheus = false
+			prometheusDepth = -1
+		}
+		if depth == 0 {
+			break
 		}
 	}
 	return strings.Join(lines, "\n")
