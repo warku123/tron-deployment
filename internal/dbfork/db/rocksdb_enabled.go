@@ -311,4 +311,3 @@ func (i *rocksDBIterator) Close() {
 	i.it.Close()
 	i.closed = true
 }
-
