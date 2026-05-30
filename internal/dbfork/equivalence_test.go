@@ -146,7 +146,15 @@ func TestEquivalence_GoVsJava(t *testing.T) {
 		// store readers. Configurable via DBFORK_JAVA_HEAP env var.
 		javaHeapFlag(),
 		"-jar", javaJar, "db", "fork",
-		"-d", filepath.Join(scratchJava, "database"),
+		// -d is the output-directory (the PARENT of database/), NOT the
+		// database/ dir itself: java DbFork's DbTool.getDB appends
+		// `database/<store>` internally (DbFork.java:120 -> DbTool). The
+		// Go side mirrors this — Apply(scratchGo) opens
+		// scratchGo/database/<store>. Passing scratchJava/database here
+		// made java look in scratchJava/database/database/<store> and
+		// fail to open the LOCK. (Latent until the gate stopped
+		// vacuously skipping — the java path was never exercised.)
+		"-d", scratchJava,
 		"-c", forkConfPath,
 	}
 	if len(cfg.Witnesses) == 0 {
