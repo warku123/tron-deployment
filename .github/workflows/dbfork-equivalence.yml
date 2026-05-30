@@ -154,8 +154,27 @@ jobs:
           # here. Guard that the extracted layout the test expects
           # actually materialised, so a future download-format change
           # fails here instead of as a confusing SKIP downstream.
-          test -d ./nile-fixture/output-directory/database \
+          DB=./nile-fixture/output-directory/database
+          test -d "$DB" \
             || { echo "::error::fixture missing output-directory/database after download"; exit 1; }
+          # Prune to the 8 dbfork stores. A full Nile snapshot is ~90 GB,
+          # dominated by block/trans/pbft-sign-data which dbfork never
+          # touches — java DbFork's initStore() and Go's Apply open only
+          # these 8 stores. The test makes TWO scratch copies, so keeping
+          # the bulk overflowed the runner disk ("no space left on
+          # device"). Pruning frees ~40+ GB and is what gets cached, so
+          # cache-hit runs are already lean.
+          KEEP="witness witness_schedule account properties asset-issue-v2 account-asset contract storage-row"
+          for d in "$DB"/*/; do
+            name=$(basename "$d")
+            case " $KEEP " in
+              *" $name "*) : ;;          # keep the 8 dbfork stores
+              *) rm -rf "$d" ;;          # drop everything else
+            esac
+          done
+          echo "Pruned fixture to dbfork stores; remaining:"
+          ls -1 "$DB"
+          df -h . | tail -1
 
       - name: Run equivalence test
         env:

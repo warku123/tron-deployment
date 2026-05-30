@@ -90,14 +90,32 @@ func TestEquivalence_GoVsJava(t *testing.T) {
 		return
 	}
 
-	// Lay down two independent scratch copies.
+	// Lay down two independent scratch copies — but ONLY of the 8
+	// dbfork stores, not the whole snapshot. A full Nile snapshot is
+	// ~90 GB and the giant non-dbfork stores (block, trans,
+	// pbft-sign-data, …) blew the GitHub runner's disk when copied
+	// twice ("no space left on device"). Both tools touch exactly
+	// these 8 stores: Go's Apply opens them on demand and diffStore
+	// iterates stores.AllStores; java DbFork's initStore() opens the
+	// identical 8 (DbFork.java:120-127) and nothing else. So copying
+	// only AllStores is provably sufficient AND cuts each scratch copy
+	// from ~90 GB to a few GB.
 	scratchGo := t.TempDir()
 	scratchJava := t.TempDir()
 	t.Logf("equivalence: scratchGo=%s scratchJava=%s", scratchGo, scratchJava)
 	for _, dst := range []string{scratchGo, scratchJava} {
-		if err := copyDir(filepath.Join(fixturePath, "database"),
-			filepath.Join(dst, "database")); err != nil {
-			t.Fatalf("equivalence: copy fixture to %s: %v", dst, err)
+		for _, store := range stores.AllStores {
+			src := filepath.Join(fixturePath, "database", store)
+			if _, statErr := os.Stat(src); statErr != nil {
+				// A lite snapshot may legitimately prune a store (e.g.
+				// storage-row); skip absent ones rather than fail. The
+				// per-store diff will then show 0 keys on both sides.
+				t.Logf("equivalence: store %q absent in fixture, skipping copy: %v", store, statErr)
+				continue
+			}
+			if err := copyDir(src, filepath.Join(dst, "database", store)); err != nil {
+				t.Fatalf("equivalence: copy store %q to %s: %v", store, dst, err)
+			}
 		}
 	}
 
