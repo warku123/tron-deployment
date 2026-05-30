@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/util"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 
@@ -171,6 +173,25 @@ func TestEquivalence_GoVsJava(t *testing.T) {
 	}
 	t.Logf("equivalence: java DbFork output:\n%s", javaOut)
 
+	// Normalize physical compaction state before the byte diff. The two
+	// tools produce the same LOGICAL state but different PHYSICAL layouts
+	// of pre-existing data: Go's Apply opens stores via goleveldb
+	// (compaction-on-open, which drops already-deleted DELETE tombstones
+	// and resolves multi-version keys to the newest sequence number)
+	// while java DbFork (leveldbjni) leaves the store less-compacted and
+	// physically retains deleted/obsolete entries. Without normalizing,
+	// the diff fails on those tombstoned/overwritten PRE-EXISTING keys —
+	// not on any mutation. Forcing a full goleveldb CompactRange on every
+	// store on BOTH sides converges them to the canonical live newest-seq
+	// / tombstone-free form, so the diff reflects only logical (mutation)
+	// differences. Verified on a real Nile snapshot (#168): goleveldb
+	// CompactRange of an account-asset store with 51 tombstones converges
+	// it to exactly the 27,799-key live set. Real mutation differences
+	// survive compaction (it changes physical layout, not logical
+	// content), so genuine divergences are still caught.
+	normalizeViaCompaction(t, scratchGo)
+	normalizeViaCompaction(t, scratchJava)
+
 	// Diff each of the 8 dbfork stores. Order is deterministic
 	// (stores.AllStores) so a failing run always reports the same
 	// store first, making CI bisection easier.
@@ -178,6 +199,31 @@ func TestEquivalence_GoVsJava(t *testing.T) {
 		t.Run(store, func(t *testing.T) {
 			diffStore(t, store, scratchGo, scratchJava)
 		})
+	}
+}
+
+// normalizeViaCompaction forces a full goleveldb CompactRange of every
+// dbfork store under root/database, converging differing physical
+// compaction states of the same logical data to the canonical live,
+// newest-sequence, tombstone-free form. See the call site + #168.
+func normalizeViaCompaction(t *testing.T, root string) {
+	t.Helper()
+	for _, store := range stores.AllStores {
+		dir := filepath.Join(root, "database", store)
+		if _, err := os.Stat(dir); err != nil {
+			continue // store legitimately absent (lite snapshot pruning)
+		}
+		ldb, err := leveldb.OpenFile(dir, nil)
+		if err != nil {
+			t.Fatalf("equivalence: normalize-open %s in %s: %v", store, root, err)
+		}
+		if err := ldb.CompactRange(util.Range{}); err != nil {
+			ldb.Close()
+			t.Fatalf("equivalence: normalize-compact %s in %s: %v", store, root, err)
+		}
+		if err := ldb.Close(); err != nil {
+			t.Fatalf("equivalence: normalize-close %s in %s: %v", store, root, err)
+		}
 	}
 }
 
