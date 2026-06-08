@@ -11,7 +11,7 @@ func TestRenderMonitoringCompose_Basic(t *testing.T) {
 	i := &intent.Intent{
 		Name: "test",
 		Monitoring: &intent.Monitoring{
-			Enabled: intent.BoolPtr(true),
+			Enabled:    intent.BoolPtr(true),
 			Prometheus: intent.PromConfig{Port: 9090, Retention: "7d"},
 			Grafana:    intent.GrafConfig{Port: 3000},
 		},
@@ -46,7 +46,7 @@ func TestRenderMonitoringCompose_NoNetwork(t *testing.T) {
 	i := &intent.Intent{
 		Name: "test",
 		Monitoring: &intent.Monitoring{
-			Enabled: intent.BoolPtr(true),
+			Enabled:    intent.BoolPtr(true),
 			Prometheus: intent.PromConfig{Port: 9090, Retention: "7d"},
 			Grafana:    intent.GrafConfig{Port: 3000},
 		},

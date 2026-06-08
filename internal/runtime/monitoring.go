@@ -103,6 +103,12 @@ func (r *MonitoringRuntime) Deploy(ctx context.Context, opts MonitoringDeployOpt
 // Remove stops and removes the monitoring stack, optionally purging data.
 func (r *MonitoringRuntime) Remove(ctx context.Context, name string, purge bool) error {
 	composePath := filepath.Join(r.workDir, name+"-monitoring", "docker-compose.yaml")
+	// No compose file means the monitoring stack was never deployed for this
+	// network; nothing to tear down. Skip silently so destroy doesn't emit a
+	// spurious warning when monitoring was disabled.
+	if sum, err := r.target.Sha256IfExists(ctx, composePath); err == nil && sum == "" {
+		return nil
+	}
 	args := []string{"compose", "-f", composePath, "-p", name + "-monitoring", "down"}
 	if purge {
 		args = append(args, "-v")

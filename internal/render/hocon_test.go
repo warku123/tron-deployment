@@ -331,9 +331,9 @@ func TestEnsureMetricsEnabled_MissingMetricsBlock(t *testing.T) {
 
 func TestRenderHOCON_MonitoringEnabled(t *testing.T) {
 	i := &intent.Intent{
-		Name:      "mon-test",
-		Network:   "mainnet",
-		Target:    intent.Target{Type: "local"},
+		Name:       "mon-test",
+		Network:    "mainnet",
+		Target:     intent.Target{Type: "local"},
 		Monitoring: &intent.Monitoring{Enabled: intent.BoolPtr(true)},
 	}
 	node := &intent.NodeSpec{Type: "fullnode"}

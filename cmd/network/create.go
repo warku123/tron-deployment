@@ -274,68 +274,68 @@ func findTemplatesDir() string {
 	}
 	return ""
 }
-	// deployNetworkMonitoring deploys a single monitoring stack for an entire
-	// private network. All nodes are scraped via the shared docker network.
-	func deployNetworkMonitoring(ctx context.Context, tgt target.Target, workDir string, parsed *intent.Intent) monitoringResult {
-		var targets []render.MonitoringTarget
-		for i, node := range parsed.Nodes {
-			nodeName := fmt.Sprintf("%s-node%d", parsed.Name, i)
-			targets = append(targets, render.MonitoringTarget{
-				Name:    nodeName,
-				Address: fmt.Sprintf("%s:%d", nodeName, node.Ports.Metrics),
-				Labels: map[string]string{
-					"group":    "group-tron",
-					"instance": nodeName,
-					"network":  parsed.Network,
-					"type":     node.Type,
-				},
-			})
-		}
 
-		networkName := "trond-" + parsed.Name
-		composeData := render.RenderMonitoringCompose(parsed.Name, parsed, targets, networkName)
-		promConfig := render.RenderPrometheusConfig(targets, parsed.Monitoring.Prometheus.Retention)
-		dsYAML, provYAML := render.RenderGrafanaProvisioning(
-			fmt.Sprintf("http://prometheus:%d", parsed.Monitoring.Prometheus.Port),
-		)
-
-		dashboards := make(map[string][]byte)
-		for _, name := range render.DashboardNames() {
-			data, err := render.LoadDashboard(name)
-			if err != nil {
-				continue
-			}
-			dashboards[name] = render.NormalizeDashboard(data)
-		}
-
-		monOpts := runtime.MonitoringDeployOpts{
-			Name:              parsed.Name,
-			ComposeData:       []byte(composeData),
-			PrometheusConfig:  []byte(promConfig),
-			GrafanaDatasource: []byte(dsYAML),
-			GrafanaProvider:   []byte(provYAML),
-			Dashboards:        dashboards,
-		}
-
-		rt := runtime.NewMonitoringRuntime(tgt, workDir)
-		if err := rt.Deploy(ctx, monOpts); err != nil {
-			return monitoringResult{error: err.Error()}
-		}
-
-		urls := map[string]string{
-			"grafana_url": fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Grafana.Port),
-		}
-		if parsed.Monitoring.Prometheus.Port > 0 {
-			urls["prometheus_url"] = fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Prometheus.Port)
-		}
-		return monitoringResult{
-			urls: urls,
-		}
+// deployNetworkMonitoring deploys a single monitoring stack for an entire
+// private network. All nodes are scraped via the shared docker network.
+func deployNetworkMonitoring(ctx context.Context, tgt target.Target, workDir string, parsed *intent.Intent) monitoringResult {
+	var targets []render.MonitoringTarget
+	for i, node := range parsed.Nodes {
+		nodeName := fmt.Sprintf("%s-node%d", parsed.Name, i)
+		targets = append(targets, render.MonitoringTarget{
+			Name:    nodeName,
+			Address: fmt.Sprintf("%s:%d", nodeName, node.Ports.Metrics),
+			Labels: map[string]string{
+				"group":    "group-tron",
+				"instance": nodeName,
+				"network":  parsed.Network,
+				"type":     node.Type,
+			},
+		})
 	}
 
-	// monitoringResult is shared with cmd/apply.go's monitoring result.
-	type monitoringResult struct {
-		error string
-		urls  map[string]string
+	networkName := "trond-" + parsed.Name
+	composeData := render.RenderMonitoringCompose(parsed.Name, parsed, targets, networkName)
+	promConfig := render.RenderPrometheusConfig(targets, parsed.Monitoring.Prometheus.Retention)
+	dsYAML, provYAML := render.RenderGrafanaProvisioning(
+		fmt.Sprintf("http://prometheus:%d", parsed.Monitoring.Prometheus.Port),
+	)
+
+	dashboards := make(map[string][]byte)
+	for _, name := range render.DashboardNames() {
+		data, err := render.LoadDashboard(name)
+		if err != nil {
+			continue
+		}
+		dashboards[name] = render.NormalizeDashboard(data)
 	}
 
+	monOpts := runtime.MonitoringDeployOpts{
+		Name:              parsed.Name,
+		ComposeData:       []byte(composeData),
+		PrometheusConfig:  []byte(promConfig),
+		GrafanaDatasource: []byte(dsYAML),
+		GrafanaProvider:   []byte(provYAML),
+		Dashboards:        dashboards,
+	}
+
+	rt := runtime.NewMonitoringRuntime(tgt, workDir)
+	if err := rt.Deploy(ctx, monOpts); err != nil {
+		return monitoringResult{error: err.Error()}
+	}
+
+	urls := map[string]string{
+		"grafana_url": fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Grafana.Port),
+	}
+	if parsed.Monitoring.Prometheus.Port > 0 {
+		urls["prometheus_url"] = fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Prometheus.Port)
+	}
+	return monitoringResult{
+		urls: urls,
+	}
+}
+
+// monitoringResult is shared with cmd/apply.go's monitoring result.
+type monitoringResult struct {
+	error string
+	urls  map[string]string
+}

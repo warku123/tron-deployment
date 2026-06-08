@@ -881,8 +881,8 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if i.Monitoring.Prometheus.Port != 9090 {
-		t.Errorf("prometheus port default = %d, want 9090", i.Monitoring.Prometheus.Port)
+	if i.Monitoring.Prometheus.Port != 0 {
+		t.Errorf("prometheus port default = %d, want 0 (unexposed)", i.Monitoring.Prometheus.Port)
 	}
 	if i.Monitoring.Grafana.Port != 3000 {
 		t.Errorf("grafana port default = %d, want 3000", i.Monitoring.Grafana.Port)

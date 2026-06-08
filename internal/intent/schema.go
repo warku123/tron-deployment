@@ -2,10 +2,10 @@ package intent
 
 // Intent is the top-level declarative file describing desired node state.
 type Intent struct {
-	Name       string     `yaml:"name" json:"name" validate:"required,hostname_rfc1123"`
-	Target     Target     `yaml:"target" json:"target" validate:"required"`
-	Network    string     `yaml:"network" json:"network" validate:"required,oneof=mainnet nile private"`
-	Nodes      []NodeSpec `yaml:"nodes" json:"nodes" validate:"required,min=1,dive"`
+	Name       string      `yaml:"name" json:"name" validate:"required,hostname_rfc1123"`
+	Target     Target      `yaml:"target" json:"target" validate:"required"`
+	Network    string      `yaml:"network" json:"network" validate:"required,oneof=mainnet nile private"`
+	Nodes      []NodeSpec  `yaml:"nodes" json:"nodes" validate:"required,min=1,dive"`
 	Monitoring *Monitoring `yaml:"monitoring,omitempty" json:"monitoring,omitempty"`
 }
 

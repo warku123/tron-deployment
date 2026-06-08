@@ -484,9 +484,9 @@ func ensureJSONRPCEnabled(config string) string {
 
 // ensureMetricsEnabled sets node.metrics.prometheus.enable = true in the HOCON
 // config. It handles three cases:
-//   1. node.metrics { prometheus { enable = false } } → set to true
-//   2. node.metrics { prometheus { ... } } (no enable) → insert enable = true
-//   3. node.metrics block missing entirely → append a new block
+//  1. node.metrics { prometheus { enable = false } } → set to true
+//  2. node.metrics { prometheus { ... } } (no enable) → insert enable = true
+//  3. node.metrics block missing entirely → append a new block
 func ensureMetricsEnabled(config string) string {
 	lines := strings.Split(config, "\n")
 	inMetrics := false

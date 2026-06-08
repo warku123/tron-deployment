@@ -21,7 +21,7 @@ func (f *fakeTarget) Exec(ctx context.Context, cmd string, args ...string) ([]by
 	return []byte{}, nil
 }
 
-func (f *fakeTarget) Upload(ctx context.Context, localPath, remotePath string) error { return nil }
+func (f *fakeTarget) Upload(ctx context.Context, localPath, remotePath string) error   { return nil }
 func (f *fakeTarget) Download(ctx context.Context, remotePath, localPath string) error { return nil }
 func (f *fakeTarget) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	return f.files[path], nil
@@ -30,11 +30,16 @@ func (f *fakeTarget) WriteFile(ctx context.Context, path string, data []byte, pe
 	f.files[path] = data
 	return nil
 }
-func (f *fakeTarget) DiskFree(ctx context.Context, path string) (uint64, error) { return 0, nil }
-func (f *fakeTarget) MemTotal(ctx context.Context) (uint64, error) { return 0, nil }
+func (f *fakeTarget) DiskFree(ctx context.Context, path string) (uint64, error)       { return 0, nil }
+func (f *fakeTarget) MemTotal(ctx context.Context) (uint64, error)                    { return 0, nil }
 func (f *fakeTarget) PutFile(ctx context.Context, localPath, remotePath string) error { return nil }
-func (f *fakeTarget) Sha256IfExists(ctx context.Context, path string) (string, error) { return "", nil }
-func (f *fakeTarget) String() string { return "fake" }
+func (f *fakeTarget) Sha256IfExists(ctx context.Context, path string) (string, error) {
+	if _, ok := f.files[path]; ok {
+		return "deadbeef", nil
+	}
+	return "", nil
+}
+func (f *fakeTarget) String() string                                      { return "fake" }
 func (f *fakeTarget) CommandExists(ctx context.Context, name string) bool { return true }
 
 func TestMonitoringRuntime_Deploy(t *testing.T) {
@@ -91,6 +96,9 @@ func TestMonitoringRuntime_Remove(t *testing.T) {
 	ft := newFakeTarget()
 	rt := NewMonitoringRuntime(ft, "/tmp/monitoring")
 
+	// Simulate a previously deployed stack so the compose file exists.
+	ft.files["/tmp/monitoring/test-monitoring/docker-compose.yaml"] = []byte("services:\n")
+
 	if err := rt.Remove(context.Background(), "test", true); err != nil {
 		t.Fatalf("Remove failed: %v", err)
 	}
@@ -108,5 +116,22 @@ func TestMonitoringRuntime_Remove(t *testing.T) {
 	}
 	if !foundDown {
 		t.Error("docker compose down not called")
+	}
+}
+
+// Remove is a no-op when no monitoring stack was ever deployed (no compose
+// file), so `network destroy` doesn't emit a spurious warning.
+func TestMonitoringRuntime_Remove_SkipsWhenAbsent(t *testing.T) {
+	ft := newFakeTarget()
+	rt := NewMonitoringRuntime(ft, "/tmp/monitoring")
+
+	if err := rt.Remove(context.Background(), "test", true); err != nil {
+		t.Fatalf("Remove failed: %v", err)
+	}
+
+	for _, cmd := range ft.cmds {
+		if len(cmd) > 0 && cmd[0] == "docker" {
+			t.Errorf("docker should not be invoked when stack absent, got %v", cmd)
+		}
 	}
 }

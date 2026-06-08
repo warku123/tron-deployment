@@ -79,11 +79,11 @@ var composeTmpl = template.Must(template.New("monitoring").Parse(monitoringCompo
 
 // monitoringComposeData carries the fields needed by the template.
 type monitoringComposeData struct {
-	Name          string
+	Name           string
 	PrometheusPort int
 	GrafanaPort    int
-	Retention     string
-	NetworkName   string
+	Retention      string
+	NetworkName    string
 }
 
 // RenderMonitoringCompose generates a docker-compose.yaml for the
@@ -125,9 +125,9 @@ func RenderPrometheusConfig(targets []MonitoringTarget, retention string) string
 	sb.WriteString("    scheme: http\n")
 	sb.WriteString("    static_configs:\n")
 	for _, t := range targets {
-		sb.WriteString(fmt.Sprintf("      - targets:\n"))
+		sb.WriteString("      - targets:\n")
 		sb.WriteString(fmt.Sprintf("          - %s\n", t.Address))
-		sb.WriteString(fmt.Sprintf("        labels:\n"))
+		sb.WriteString("        labels:\n")
 		for k, v := range t.Labels {
 			sb.WriteString(fmt.Sprintf("          %s: %s\n", k, v))
 		}
@@ -196,16 +196,16 @@ func NormalizeDashboard(data []byte) []byte {
 						switch im["type"] {
 						case "datasource":
 							im["current"] = map[string]any{
-								"text":    "prometheus",
-								"value":   "prometheus",
+								"text":     "prometheus",
+								"value":    "prometheus",
 								"selected": false,
 							}
 						case "query":
 							// Clear hardcoded defaults so Grafana picks the
 							// first available label value at render time.
 							im["current"] = map[string]any{
-								"text":    "",
-								"value":   "",
+								"text":     "",
+								"value":    "",
 								"selected": false,
 							}
 						}

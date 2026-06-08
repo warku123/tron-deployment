@@ -455,8 +455,8 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 			"http": fmt.Sprintf("http://127.0.0.1:%d", ports.HTTP),
 			"grpc": fmt.Sprintf("127.0.0.1:%d", ports.GRPC),
 		},
-		DurationMs: time.Since(start).Milliseconds(),
-		Build:      buildSummary,
+		DurationMs:          time.Since(start).Milliseconds(),
+		Build:               buildSummary,
 		MonitoringEndpoints: monitoringEndpointsFromExisting(opts.Existing),
 	}
 }
