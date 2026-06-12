@@ -69,8 +69,12 @@ const (
 //     - Proto-aware compare for variable-shape stores (witness,
 //     account, contract, asset-issue-v2) — handles proto3 map
 //     field non-deterministic encoding.
-//  5. Reports the first N diffs per store so a failing run is
-//     debuggable without t.Fatal'ing on the very first mismatch.
+//  5. Fails on any diff at a key the fork.conf mutation writes (or
+//     anywhere in the small fully-strict stores); logs diffs on
+//     untouched pre-existing keys as the #168 read-layer artifact
+//     without failing. Reports the first N diffs per store so a
+//     failing run is debuggable without t.Fatal'ing on the very
+//     first mismatch.
 func TestEquivalence_GoVsJava(t *testing.T) {
 	fixturePath, ok := mustEnvFile(t, envFixture, "Nile fixture", true)
 	if !ok {
@@ -175,32 +179,138 @@ func TestEquivalence_GoVsJava(t *testing.T) {
 	// (stores.AllStores) so a failing run always reports the same
 	// store first, making CI bisection easier.
 	//
-	// account-asset and contract are diffed in NON-STRICT mode: their
-	// diffs are logged but do not fail the gate. This is NOT a mutation
-	// concern — it is a proven test-harness artifact (#168). Both stores
+	// Strictness is SCOPED, not per-store (#168). The big data stores
+	// (account, account-asset, contract, asset-issue-v2, storage-row)
 	// carry pre-existing DELETE tombstones + multi-version keys from
 	// normal java-tron operation; the test reads BOTH outputs via
-	// goleveldb, but java-tron reads via leveldbjni, and the two LevelDB
-	// implementations resolve a java-DbFork-compacted physical layout
-	// differently. Confirmed on a real Nile snapshot (EC2 forensics):
-	// goleveldb and leveldbjni return the IDENTICAL newest value for
-	// every multi-version key, and leveldbjni reading the goleveldb-
-	// compacted ("Go output") store returns the same newest values as
-	// reading java's output — so a shadow-fork booted from either output
-	// serves byte-identical query results. The fork.conf-driven
-	// mutations land in the other 6 stores, which stay STRICT (blocking).
-	// Follow-up: scope the diff to fork.conf-mutated keys so these two
-	// can return to strict (#168).
-	soft := map[string]bool{
-		stores.AccountAssetStore: true,
-		stores.ContractStore:     true,
+	// goleveldb, but java DbFork writes via leveldbjni, and the two
+	// LevelDB implementations resolve such a physical layout differently
+	// — so whole-store byte equality on those stores depends on the
+	// compaction state of whatever Nile snapshot the weekly fixture
+	// cache captured. It first bit account-asset/contract, then a later
+	// snapshot tripped storage-row; ANY churn-heavy store can flip.
+	// Confirmed on a real Nile snapshot (EC2 forensics): goleveldb and
+	// leveldbjni return the IDENTICAL newest value for every multi-
+	// version key, and leveldbjni reading the goleveldb-compacted ("Go
+	// output") store returns the same newest values as reading java's
+	// output — a shadow-fork booted from either output serves byte-
+	// identical query results.
+	//
+	// So the gate's strict guarantee is exactly what dbfork promises:
+	// every key the fork.conf mutation TOUCHES is byte-identical across
+	// Go and Java (computed below by replaying the mutators against
+	// recording spies — 100% production key-derivation, no duplication),
+	// while diffs on untouched pre-existing keys are logged as the known
+	// read-layer artifact without blocking. The three small mutation-
+	// central stores (witness, witness_schedule, properties) stay fully
+	// strict: they're rewritten wholesale by the fork (wipe semantics
+	// included), tiny, and have never shown the artifact.
+	targets := computeMutationTargets(t, scratchGo, cfg)
+	fullStrict := map[string]bool{
+		stores.WitnessStore:           true,
+		stores.WitnessScheduleStore:   true,
+		stores.DynamicPropertiesStore: true,
 	}
 	for _, store := range stores.AllStores {
 		t.Run(store, func(t *testing.T) {
-			diffStore(t, store, scratchGo, scratchJava, !soft[store])
+			diffStore(t, store, scratchGo, scratchJava, fullStrict[store], targets[store])
 		})
 	}
 }
+
+// computeMutationTargets replays the account + TRC20 mutators against
+// recording spy engines to learn the exact key set the fork.conf
+// mutation writes in the big data stores. Reads delegate to the (post-
+// Apply) Go scratch stores; writes are recorded and DISCARDED, so the
+// replay cannot perturb the state being diffed.
+//
+// Replaying against the already-mutated Go scratch is sound for KEY
+// derivation: account keys are the decoded spec addresses; account-
+// asset keys depend only on Account.AssetOptimized (which Apply never
+// changes); storage-row keys depend only on the contract proto
+// (contract store is read-only to dbfork). Values read may differ from
+// the original run — only the recorded keys are used.
+//
+// A derivation bug in the engine cannot hide itself here: the test-
+// derived key equals whatever (possibly wrong) key Go actually wrote,
+// and the strict per-key compare then fails because java wrote the
+// correct key instead — surfacing as a mutation-target key present
+// only on the Go side.
+func computeMutationTargets(t *testing.T, goRoot string, cfg *Config) map[string]map[string]bool {
+	t.Helper()
+	targets := map[string]map[string]bool{}
+
+	if len(cfg.Accounts) > 0 {
+		accountEng, err := db.OpenLevelDB(goRoot, stores.AccountStore)
+		if err != nil {
+			t.Fatalf("targets: open account: %v", err)
+		}
+		assetEng, err := db.OpenLevelDB(goRoot, stores.AssetIssueV2Store)
+		if err != nil {
+			t.Fatalf("targets: open asset-issue-v2: %v", err)
+		}
+		recAccount := &recordingEngine{inner: accountEng}
+		recAccountAsset := &recordingEngine{}
+		if _, err := MutateAccounts(recAccount, recAccountAsset, assetEng, cfg.Accounts); err != nil {
+			t.Fatalf("targets: replay MutateAccounts: %v", err)
+		}
+		targets[stores.AccountStore] = recAccount.keys
+		targets[stores.AccountAssetStore] = recAccountAsset.keys
+		if err := accountEng.Close(); err != nil {
+			t.Fatalf("targets: close account: %v", err)
+		}
+		if err := assetEng.Close(); err != nil {
+			t.Fatalf("targets: close asset-issue-v2: %v", err)
+		}
+	}
+
+	if len(cfg.TRC20Contracts) > 0 {
+		contractEng, err := db.OpenLevelDB(goRoot, stores.ContractStore)
+		if err != nil {
+			t.Fatalf("targets: open contract: %v", err)
+		}
+		recStorageRow := &recordingEngine{}
+		if _, err := MutateTRC20Contracts(contractEng, recStorageRow, cfg.TRC20Contracts); err != nil {
+			t.Fatalf("targets: replay MutateTRC20Contracts: %v", err)
+		}
+		targets[stores.StorageRowStore] = recStorageRow.keys
+		if err := contractEng.Close(); err != nil {
+			t.Fatalf("targets: close contract: %v", err)
+		}
+	}
+
+	for store, keys := range targets {
+		t.Logf("targets: %s: %d fork.conf mutation-target keys", store, len(keys))
+	}
+	return targets
+}
+
+// recordingEngine is a db.Engine spy: Get/NewIterator delegate to the
+// wrapped engine (nil inner is fine for write-only stores — the
+// mutators never read those), while batches record write KEYS and drop
+// the writes. Used by computeMutationTargets to learn the fork.conf
+// mutation footprint from the production mutators themselves.
+type recordingEngine struct {
+	inner db.Engine
+	keys  map[string]bool // hex-encoded keys of recorded Put/Delete calls
+}
+
+func (r *recordingEngine) Get(key []byte) ([]byte, error) { return r.inner.Get(key) }
+func (r *recordingEngine) NewIterator() db.Iterator       { return r.inner.NewIterator() }
+func (r *recordingEngine) Close() error                   { return nil } // caller owns inner
+func (r *recordingEngine) NewBatch() db.Batch {
+	if r.keys == nil {
+		r.keys = map[string]bool{}
+	}
+	return &recordingBatch{keys: r.keys}
+}
+
+type recordingBatch struct{ keys map[string]bool }
+
+func (b *recordingBatch) Put(key, _ []byte) { b.keys[hex.EncodeToString(key)] = true }
+func (b *recordingBatch) Delete(key []byte) { b.keys[hex.EncodeToString(key)] = true }
+func (b *recordingBatch) Write() error      { return nil }
+func (b *recordingBatch) Close()            {}
 
 // javaHeapFlag returns the JVM `-Xmx<size>` flag for the equivalence
 // invocation. Defaults to `-Xmx4g` which is enough for Nile lite
@@ -257,20 +367,19 @@ func mustEnvFile(t *testing.T, envName, label string, expectDir bool) (string, b
 // every key-value pair. Splits raw vs proto-aware paths based on
 // the store's content type.
 //
-// strict controls failure semantics: when true, any diff fails the test
-// (the real release gate); when false, diffs are logged with a #168
-// prefix but do not fail — used for account-asset/contract, whose diffs
-// are a proven goleveldb-vs-leveldbjni read artifact with no runtime
-// effect (see the call site).
-func diffStore(t *testing.T, store, goRoot, javaRoot string, strict bool) {
+// Failure semantics are per-KEY (#168): a diff fails the test when the
+// store is fullStrict (witness/witness_schedule/properties) or the key
+// is in targets (a key the fork.conf mutation writes — computed by
+// computeMutationTargets). Diffs on other keys are pre-existing-data
+// noise from the goleveldb-vs-leveldbjni read-layer artifact and are
+// logged with a #168 prefix without failing. Every target key must
+// additionally be PRESENT on both sides — a mutator that silently
+// dropped a write would otherwise diff clean (absent == absent).
+func diffStore(t *testing.T, store, goRoot, javaRoot string, fullStrict bool, targets map[string]bool) {
 	t.Helper()
-	// reportf is t.Errorf in strict mode (fails the gate) or a #168-
-	// tagged t.Logf in non-strict mode (informational only).
-	reportf := t.Errorf
-	if !strict {
-		reportf = func(format string, args ...any) {
-			t.Logf("#168 KNOWN-ARTIFACT (non-blocking) "+format, args...)
-		}
+	strictAt := func(hk string) bool { return fullStrict || targets[hk] }
+	artifactf := func(format string, args ...any) {
+		t.Logf("#168 KNOWN-ARTIFACT (non-blocking) "+format, args...)
 	}
 
 	goEng, err := db.OpenLevelDB(goRoot, store)
@@ -297,31 +406,56 @@ func diffStore(t *testing.T, store, goRoot, javaRoot string, strict bool) {
 	// `storage-row`, for example) is visible in the test log.
 	t.Logf("%s: %d keys on Go, %d keys on Java", store, len(goMap), len(javaMap))
 
-	// Key-set diff first — surfaces extra/missing keys before drowning
-	// the log in value diffs.
-	reportKeySetDiff(reportf, store, goMap, javaMap)
+	// Mutation-target coverage: every key the mutators write must
+	// exist on BOTH sides before any value comparison.
+	for _, hk := range sortedKeySet(targets) {
+		if _, ok := goMap[hk]; !ok {
+			t.Errorf("%s: mutation-target key %s missing on Go side", store, hk)
+		}
+		if _, ok := javaMap[hk]; !ok {
+			t.Errorf("%s: mutation-target key %s missing on Java side", store, hk)
+		}
+	}
 
-	// Per-key value compare. Cap reported diffs so a wholesale
-	// regression doesn't write thousands of lines.
+	// Key-set diff next — surfaces extra/missing keys before drowning
+	// the log in value diffs.
+	reportKeySetDiff(store, "Go", keysOnlyIn(goMap, javaMap), strictAt, t.Errorf, artifactf)
+	reportKeySetDiff(store, "Java", keysOnlyIn(javaMap, goMap), strictAt, t.Errorf, artifactf)
+
+	// Per-key value compare. Cap reported diffs (strict and artifact
+	// counted separately) so a wholesale regression doesn't write
+	// thousands of lines.
 	const maxValueDiffs = 5
-	diffs := 0
-	keys := sortedHexKeys(goMap)
-	for _, hk := range keys {
+	strictDiffs, softDiffs := 0, 0
+	for _, hk := range sortedHexKeys(goMap) {
 		jv, ok := javaMap[hk]
 		if !ok {
 			continue // already reported by reportKeySetDiff
 		}
 		gv := goMap[hk]
-		if equal, why := compareValue(store, gv, jv); !equal {
-			diffs++
-			if diffs <= maxValueDiffs {
-				reportf("%s: key %s: %s", store, hk, why)
+		equal, why := compareValue(store, gv, jv)
+		if equal {
+			continue
+		}
+		if strictAt(hk) {
+			strictDiffs++
+			if strictDiffs <= maxValueDiffs {
+				t.Errorf("%s: key %s: %s", store, hk, why)
+			}
+		} else {
+			softDiffs++
+			if softDiffs <= maxValueDiffs {
+				artifactf("%s: key %s: %s", store, hk, why)
 			}
 		}
 	}
-	if diffs > maxValueDiffs {
-		reportf("%s: %d additional value diffs not shown (cap=%d)",
-			store, diffs-maxValueDiffs, maxValueDiffs)
+	if strictDiffs > maxValueDiffs {
+		t.Errorf("%s: %d additional strict value diffs not shown (cap=%d)",
+			store, strictDiffs-maxValueDiffs, maxValueDiffs)
+	}
+	if softDiffs > maxValueDiffs {
+		artifactf("%s: %d additional value diffs not shown (cap=%d)",
+			store, softDiffs-maxValueDiffs, maxValueDiffs)
 	}
 }
 
@@ -402,23 +536,33 @@ func collectAllKV(eng db.Engine) (map[string][]byte, error) {
 	return out, nil
 }
 
-// reportKeySetDiff reports keys present on one side but not the other.
-// Caps reports so a wholesale regression doesn't flood the log. reportf
-// is the caller's strict (t.Errorf) or non-strict (#168 t.Logf) reporter.
-func reportKeySetDiff(reportf func(string, ...any), store string, goMap, javaMap map[string][]byte) {
+// reportKeySetDiff reports keys present on the named side only,
+// partitioned by strictness: mutation-target (or fullStrict) keys go
+// to strictf (t.Errorf at the diffStore call site — fails the gate);
+// the rest go to artifactf as #168 noise. Both reporters are injected
+// so the partition itself is unit-testable without failing the suite.
+// Caps each partition so a wholesale regression doesn't flood the log.
+func reportKeySetDiff(store, side string, only []string,
+	strictAt func(string) bool, strictf, artifactf func(string, ...any)) {
 	const maxKeyDiffs = 5
 
-	onlyGo := keysOnlyIn(goMap, javaMap)
-	onlyJava := keysOnlyIn(javaMap, goMap)
-	if len(onlyGo) > 0 {
-		n := min(len(onlyGo), maxKeyDiffs)
-		reportf("%s: %d keys present only on Go side; first %d: %v",
-			store, len(onlyGo), n, onlyGo[:n])
+	var strictKeys, softKeys []string
+	for _, k := range only {
+		if strictAt(k) {
+			strictKeys = append(strictKeys, k)
+		} else {
+			softKeys = append(softKeys, k)
+		}
 	}
-	if len(onlyJava) > 0 {
-		n := min(len(onlyJava), maxKeyDiffs)
-		reportf("%s: %d keys present only on Java side; first %d: %v",
-			store, len(onlyJava), n, onlyJava[:n])
+	if len(strictKeys) > 0 {
+		n := min(len(strictKeys), maxKeyDiffs)
+		strictf("%s: %d strict keys present only on %s side; first %d: %v",
+			store, len(strictKeys), side, n, strictKeys[:n])
+	}
+	if len(softKeys) > 0 {
+		n := min(len(softKeys), maxKeyDiffs)
+		artifactf("%s: %d keys present only on %s side; first %d: %v",
+			store, len(softKeys), side, n, softKeys[:n])
 	}
 }
 
@@ -428,6 +572,17 @@ func keysOnlyIn(a, b map[string][]byte) []string {
 		if _, present := b[k]; !present {
 			out = append(out, k)
 		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sortedKeySet returns the keys of a string-set in sorted order, so
+// target-coverage failures report deterministically across runs.
+func sortedKeySet(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out
@@ -595,6 +750,73 @@ func TestCompareValue_ProtoDifferentFieldFails(t *testing.T) {
 	}
 	if !strings.Contains(why, "100") || !strings.Contains(why, "101") {
 		t.Errorf("diff message should show both values, got: %s", why)
+	}
+}
+
+// TestRecordingEngine_CapturesWriteKeys pins the spy used by
+// computeMutationTargets: batch Put/Delete keys are recorded (hex)
+// across multiple batches, writes are dropped, and Close never
+// touches the wrapped engine.
+func TestRecordingEngine_CapturesWriteKeys(t *testing.T) {
+	rec := &recordingEngine{}
+	b1 := rec.NewBatch()
+	b1.Put([]byte{0x01, 0x02}, []byte("v"))
+	b1.Delete([]byte{0x03})
+	if err := b1.Write(); err != nil {
+		t.Fatalf("recording Write: %v", err)
+	}
+	b1.Close()
+	b2 := rec.NewBatch()
+	b2.Put([]byte{0x04}, nil)
+	if err := b2.Write(); err != nil {
+		t.Fatalf("recording Write: %v", err)
+	}
+	b2.Close()
+
+	want := []string{"0102", "03", "04"}
+	if len(rec.keys) != len(want) {
+		t.Fatalf("recorded %d keys (%v); want %d", len(rec.keys), rec.keys, len(want))
+	}
+	for _, k := range want {
+		if !rec.keys[k] {
+			t.Errorf("key %q not recorded; got %v", k, rec.keys)
+		}
+	}
+	if err := rec.Close(); err != nil {
+		t.Errorf("recordingEngine.Close: %v", err)
+	}
+}
+
+// TestReportKeySetDiff_PartitionsByStrictness pins the #168 scoped-
+// strictness split: a one-sided key routes to the strict reporter
+// (t.Errorf at the real call site) only when strictAt says so; others
+// go to the artifact logger.
+func TestReportKeySetDiff_PartitionsByStrictness(t *testing.T) {
+	var stricts, artifacts []string
+	strictf := func(format string, args ...any) {
+		stricts = append(stricts, fmt.Sprintf(format, args...))
+	}
+	artifactf := func(format string, args ...any) {
+		artifacts = append(artifacts, fmt.Sprintf(format, args...))
+	}
+	strictAt := func(hk string) bool { return hk == "aa" }
+
+	// Soft-only side: nothing strict, both keys logged as artifact.
+	reportKeySetDiff("store-x", "Go", []string{"bb", "cc"}, strictAt, strictf, artifactf)
+	if len(stricts) != 0 {
+		t.Errorf("soft-only keys routed to strict reporter: %v", stricts)
+	}
+	if len(artifacts) != 1 || !strings.Contains(artifacts[0], "2 keys present only on Go side") {
+		t.Errorf("soft keys not routed to artifact log: %v", artifacts)
+	}
+
+	// Mixed side: the target key is strict, the other stays artifact.
+	reportKeySetDiff("store-x", "Java", []string{"aa", "bb"}, strictAt, strictf, artifactf)
+	if len(stricts) != 1 || !strings.Contains(stricts[0], "1 strict keys present only on Java side") {
+		t.Errorf("strict one-sided key not routed to strict reporter: %v", stricts)
+	}
+	if len(artifacts) != 2 || !strings.Contains(artifacts[1], "1 keys present only on Java side") {
+		t.Errorf("soft key alongside strict not routed to artifact log: %v", artifacts)
 	}
 }
 
