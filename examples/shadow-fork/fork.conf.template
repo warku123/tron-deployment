@@ -1,0 +1,73 @@
+# Shadow-fork PoC fork.conf TEMPLATE.
+#
+# Replace each placeholder below with values produced by
+# `scripts/poc-shadow-fork.sh setup` (which generates the witness
+# keypair and prints the address) OR by your own keygen tool of
+# choice (TronLink / tronweb / tronpy / wallet-cli).
+#
+# This is the MINIMUM viable fork.conf for a 1-witness PoC chain.
+# Single-witness setups produce blocks every 3 seconds (the active
+# slate has one entry → every slot is that witness's). Real shadow-
+# fork testing typically uses 27 witnesses for production parity;
+# this is just the demo skeleton.
+
+witnesses = [
+  {
+    address = "<WITNESS_TRON_ADDRESS>"
+    url     = "http://shadow-fork.local"
+    voteCount = 100000000
+  }
+]
+
+# Fund the witness address itself so it can sign blocks.
+# 100,000 TRX (10^11 sun) is plenty for any test workload. Add
+# more entries as needed — each must be a separate { } object in
+# the array, separated by commas.
+accounts = [
+  {
+    address = "<WITNESS_TRON_ADDRESS>"
+    accountName = "shadow-fork-witness"
+    balance = 100000000000
+  }
+]
+
+# DynamicProperties — make the chain advance immediately rather than
+# replaying hours of slot catch-up. Set both to current millis-epoch
+# (the script auto-substitutes ${NOW_MS}); maintenance interval
+# stays at mainnet default (6h = 21,600,000 ms).
+latestBlockHeaderTimestamp = <NOW_MS>
+maintenanceTimeInterval    = 21600000
+nextMaintenanceTime        = <NEXT_MAINTENANCE_MS>
+
+# TRC20 contract balance overrides (commented-out template). Useful
+# for shadow-forking token economic state — fund an address with a
+# specific TRC20 balance so contract interactions see it post-fork.
+#
+# Fields:
+#   contractAddress       — TRC20 contract's Base58 address
+#   balancesSlotPosition  — storage slot index of the `balances` mapping
+#                           in the contract's Solidity source (typically
+#                           0 for OpenZeppelin ERC20-style, 1 for some
+#                           USDT-N derivatives — check the contract ABI)
+#   address               — the address whose balance to set (Base58)
+#   balance               — new balance as a DECIMAL STRING (in raw
+#                           units — for a 6-decimal token, 1.5 USDT
+#                           is "1500000")
+#
+# Verify with `trc20_slots_updated` in the mutate JSON output: each
+# entry here increments the counter on successful write. See
+# internal/dbfork/trc20.go for the slot-derivation math (keccak256
+# of the concatenated address + slot bytes; Solidity ABIv0 vs ABIv1
+# changes the hash composition).
+#
+# trc20Contracts = [
+#   {
+#     contractAddress      = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+#     balancesSlotPosition = 0
+#     # The address to fund — replace with whatever Base58 you need
+#     # post-fork. Example value from the java toolkit's canonical
+#     # fork.conf at tron-docker/tools/toolkit/src/main/resources/.
+#     address              = "TRY18iTFy6p8yhWiCt1dhd2gz2c15ungq3"
+#     balance              = "98800000000000000"
+#   }
+# ]

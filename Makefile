@@ -41,7 +41,7 @@ endif
 
 GOFLAGS    ?=
 
-.PHONY: build test lint e2e build-all clean clean-all fmt vet tidy sync-templates sync-schemas snapshot-schema-baseline update-render-golden docs man cover vuln bootstrap-go build-replay install-replay build-txgen install-txgen
+.PHONY: build test lint e2e build-all clean clean-all fmt vet tidy sync-templates sync-schemas sync-knowledge snapshot-schema-baseline update-render-golden docs man cover vuln bootstrap-go build-replay install-replay build-txgen install-txgen
 
 ## bootstrap-go: Download + verify the project-local Go toolchain
 ##               (idempotent; safe to re-run; no-op if already current)
@@ -145,6 +145,15 @@ sync-schemas:
 	@echo "syncing schemas/output/ → internal/schema/files/"
 	@cp schemas/output/*.schema.json internal/schema/files/
 	@echo "done. Re-run 'make test' to confirm."
+
+## sync-knowledge: Mirror knowledge/*.md into internal/knowledge/files/
+##                 so `trond knowledge <topic>` returns the same content
+##                 GitHub renders. Run after editing any operator doc
+##                 under knowledge/.
+sync-knowledge:
+	@echo "syncing knowledge/*.md → internal/knowledge/files/"
+	@cp knowledge/*.md internal/knowledge/files/
+	@echo "done. Rebuild the binary to pick up the new embed."
 
 ## snapshot-schema-baseline: Refresh internal/schema/version_baseline.json
 ##                           after intentional schema changes. The test

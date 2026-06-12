@@ -83,6 +83,57 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
+  proto-drift:
+    name: Proto-binding drift
+    runs-on: ubuntu-latest
+    # Regenerates internal/dbfork/proto/pb/ via the project's gen
+    # script and fails if the result differs from what's committed.
+    # Catches two failure modes:
+    #   1. Upstream .proto edit (via the git subtree pull workflow)
+    #      without running the gen script — committed bindings would
+    #      silently lag the proto definitions.
+    #   2. Hand-edit of a *.pb.go file (they look like normal Go and
+    #      tempt operators to "just tweak" — they're machine-
+    #      generated and will be clobbered by the next regen).
+    #
+    # protoc-gen-go version is pinned via go.mod's `tool` directive
+    # (Go 1.24+ pattern). `go install tool` here installs ALL tools
+    # declared in go.mod — currently just protoc-gen-go @ the
+    # matching google.golang.org/protobuf runtime version. Single
+    # source of truth; mismatched generator vs runtime can't happen.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          # Pinned to the EXACT 35.0 that generated the committed
+          # internal/dbfork/proto/pb/*.pb.go files (their header reads
+          # `protoc v7.35.0`). The drift job regenerates and diffs the
+          # committed bytes, including that header line — so a wildcard
+          # `35.x` would resolve to the latest 35.minor and false-report
+          # drift the day 35.1 ships, despite no .proto change. Bump
+          # this deliberately alongside a regenerate-and-commit.
+          version: "35.0"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install pinned tools (protoc-gen-go via go.mod)
+        run: go install tool
+      - name: Regenerate proto bindings
+        run: bash scripts/gen-dbfork-protos.sh
+      - name: Fail on drift
+        # `git diff --exit-code` returns 1 if any file differs. We dump
+        # the diff first so the failure log shows what changed without
+        # the developer needing to re-run locally.
+        run: |
+          if ! git diff --exit-code internal/dbfork/proto/pb/; then
+            echo "::error::Committed .pb.go files drifted from regeneration."
+            echo "::error::Run 'bash scripts/gen-dbfork-protos.sh' locally + commit the result."
+            exit 1
+          fi
+
   build-matrix:
     name: Cross-compile
     runs-on: ubuntu-latest

@@ -1,0 +1,215 @@
+name: dbfork Go-vs-Java Equivalence
+
+# Phase 1 release gate: runs TestEquivalence_GoVsJava, which stands
+# up two scratch copies of a Nile snapshot, applies the canonical
+# fork.conf via Go (dbfork) and Java (tron-docker/tools/toolkit
+# DbFork), and diffs all 8 stores. A pass means the Go port produces
+# byte-identical state to the reference implementation.
+#
+# Why a separate workflow:
+#   - The fixture is multi-GB (Nile lite snapshot, ~45 GB compressed).
+#     Too expensive to run on every PR; this fires on schedule + on
+#     explicit dispatch + on PRs that touch internal/dbfork/**.
+#   - Builds the java toolkit on demand. Requires JDK 11+ and the
+#     `tron-docker` repo as a peer checkout.
+#
+# When a release-bound PR lands in internal/dbfork, this workflow
+# acts as the final byte-equivalence gate before the PR can merge.
+
+on:
+  push:
+    branches: [master, develop]
+    paths:
+      - 'internal/dbfork/**'
+      - 'internal/snapshot/**'
+      - '.github/workflows/dbfork-equivalence.yml'
+  pull_request:
+    paths:
+      - 'internal/dbfork/**'
+      - 'internal/snapshot/**'
+      - '.github/workflows/dbfork-equivalence.yml'
+  schedule:
+    # Weekly catch — surfaces snapshot-format drift (java DbFork
+    # upstream changes, Nile snapshot publisher output rotation)
+    # even when no dbfork code has changed.
+    - cron: "0 6 * * 0"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  equivalence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90  # snapshot download is the long pole (~30-45 min)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub-hosted runners ship ~14 GB of preinstalled tools we
+      # don't need (Android SDK, .NET, CodeQL packages, etc.) and have
+      # ~84 GB total disk. The Nile lite snapshot is ~45 GB compressed
+      # / ~90 GB extracted, so we MUST reclaim disk before trond's
+      # pre-download free-space check (the first run's "Error [DISK_
+      # SPACE_ERROR]: need ~91.57 GB free, have 88.36 GB" failure).
+      # This action reclaims ~30-40 GB by removing unused tools.
+      - name: Free runner disk space for the Nile fixture
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          # docker engine cleanup is the slow pass; we don't run docker
+          # in this workflow but disabling saves several minutes.
+          docker-images: false
+          swap-storage: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Checkout tron-docker for java toolkit
+        uses: actions/checkout@v4
+        with:
+          repository: tronprotocol/tron-docker
+          path: tron-docker
+          # Pinned to a SHA for a reproducible reference implementation:
+          # a floating `main` could change DbFork's output mid-flight and
+          # turn the equivalence gate red (or, worse, green against a
+          # changed reference) without any change to this repo. Bump
+          # deliberately when adopting a new java DbFork behaviour.
+          ref: d89d353b06d1f5016d91b02654508eeecdf5a904  # tron-docker main @ 2026-05-27
+
+      - name: Build java DbFork toolkit
+        # tron-docker's tools/ is a multi-project gradle build. The
+        # wrapper lives at tools/gradlew/, and toolkit is referenced
+        # as the `:toolkit` subproject. Per the toolkit README's
+        # "Build The Toolkit" section. shadowJar (fat jar) bundles
+        # the dependency closure so the equivalence test can launch
+        # via `java -jar` without a classpath dance.
+        run: |
+          cd tron-docker/tools/gradlew
+          ./gradlew :toolkit:shadowJar
+          ls -la ../toolkit/build/libs/
+
+      - name: Resolve toolkit jar path
+        id: jar
+        # The toolkit build.gradle sets archiveBaseName='Toolkit' +
+        # archiveClassifier='' with no version, so shadowJar emits a
+        # single fat jar named exactly `Toolkit.jar` (NOT the shadow-
+        # plugin default `Toolkit-<ver>-all.jar`). An earlier glob of
+        # `Toolkit*-all.jar` matched nothing, left this output empty,
+        # and the empty DBFORK_JAVA_TOOLKIT resolved to a directory ->
+        # the test SKIPPED and the job passed vacuously. Fail loudly if
+        # the artifact name ever changes again.
+        run: |
+          set -euo pipefail
+          JAR=tron-docker/tools/toolkit/build/libs/Toolkit.jar
+          if [ ! -f "$JAR" ]; then
+            echo "::error::toolkit jar not found at $JAR — did the shadowJar artifact name change?"
+            ls -la tron-docker/tools/toolkit/build/libs/ || true
+            exit 1
+          fi
+          echo "path=$JAR" >> "$GITHUB_OUTPUT"
+          echo "Found toolkit jar at: $JAR"
+
+      - name: Compute weekly cache key
+        id: weekkey
+        # ISO week-of-year — stable across all runs in a given week,
+        # so the cache primary key actually hits. github.run_id rotates
+        # per run and would force a fresh write every time, bloating
+        # the 10 GB per-repo cache budget without ever restoring.
+        run: echo "yyyyww=$(date -u +%Y%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Nile fixture
+        id: fixture-cache
+        uses: actions/cache@v4
+        with:
+          path: ./nile-fixture
+          # Refresh weekly. Snapshot rotates daily but byte content
+          # doesn't matter for equivalence — both Go and Java see the
+          # SAME copy, so any captured snapshot is fine for diffing.
+          key: nile-fixture-${{ steps.weekkey.outputs.yyyyww }}
+          restore-keys: |
+            nile-fixture-
+
+      - name: Build trond + download Nile fixture (if cache miss)
+        if: steps.fixture-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          go build -o bin/trond ./
+          ./bin/trond snapshot download \
+            --network nile --type lite \
+            --to ./nile-fixture
+          # snapshot download streams gunzip|tar straight to disk and
+          # never persists the .tgz, so there is nothing to clean up
+          # here. Guard that the extracted layout the test expects
+          # actually materialised, so a future download-format change
+          # fails here instead of as a confusing SKIP downstream.
+          DB=./nile-fixture/output-directory/database
+          test -d "$DB" \
+            || { echo "::error::fixture missing output-directory/database after download"; exit 1; }
+          # Prune to the 8 dbfork stores. A full Nile snapshot is ~90 GB,
+          # dominated by block/trans/pbft-sign-data which dbfork never
+          # touches — java DbFork's initStore() and Go's Apply open only
+          # these 8 stores. The test makes TWO scratch copies, so keeping
+          # the bulk overflowed the runner disk ("no space left on
+          # device"). Pruning frees ~40+ GB and is what gets cached, so
+          # cache-hit runs are already lean.
+          KEEP="witness witness_schedule account properties asset-issue-v2 account-asset contract storage-row"
+          for d in "$DB"/*/; do
+            name=$(basename "$d")
+            case " $KEEP " in
+              *" $name "*) : ;;          # keep the 8 dbfork stores
+              *) rm -rf "$d" ;;          # drop everything else
+            esac
+          done
+          echo "Pruned fixture to dbfork stores; remaining:"
+          ls -1 "$DB"
+          df -h . | tail -1
+
+      - name: Run equivalence test
+        env:
+          DBFORK_NILE_FIXTURE: ${{ github.workspace }}/nile-fixture/output-directory
+          DBFORK_JAVA_TOOLKIT: ${{ github.workspace }}/${{ steps.jar.outputs.path }}
+          DBFORK_FORK_CONF: ${{ github.workspace }}/tron-docker/tools/toolkit/src/main/resources/fork.conf
+          DBFORK_JAVA_HEAP: "4g"
+        run: |
+          set -euo pipefail
+          # TestEquivalence_GoVsJava SKIPs (does not fail) when its env
+          # prereqs are missing — that keeps local `go test ./...` green
+          # for devs without the toolkit. But in THIS workflow a skip
+          # means the release gate didn't actually run, which previously
+          # passed vacuously. Capture the output and hard-fail on SKIP so
+          # the gate can never be silently hollow again.
+          go test -v -timeout 30m -run TestEquivalence_GoVsJava ./internal/dbfork/ 2>&1 | tee equivalence.out
+          if grep -q -- "--- SKIP: TestEquivalence_GoVsJava" equivalence.out; then
+            echo "::error::equivalence test SKIPPED — env prereqs (fixture / toolkit jar / fork.conf) not satisfied; the gate did not run"
+            exit 1
+          fi
+          # Also assert the per-store diff actually executed (diffStore
+          # logs "<store>: N keys on Go, M keys on Java"); its absence
+          # means the run was hollow even if it didn't formally SKIP.
+          if ! grep -q "keys on Go" equivalence.out; then
+            echo "::error::equivalence test produced no per-store diff output — run was hollow"
+            exit 1
+          fi
+
+      - name: Upload diff log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: equivalence-failure-log
+          path: |
+            equivalence.out
+            tron-docker/tools/toolkit/build/logs/
+          retention-days: 14
+          if-no-files-found: ignore

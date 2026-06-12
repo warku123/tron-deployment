@@ -46,7 +46,10 @@ import (
 //	1.4.0 — add build-list / build-inspect / build-prune schemas
 //	        (new `trond build list/inspect/prune` cache mgmt
 //	        subcommands; existing schemas unchanged).
-const SchemaVersion = "1.4.0"
+//	1.5.0 — add shadow-fork-mutate schema (new `trond shadow-fork
+//	        mutate` command — Go port of java DbFork; existing
+//	        schemas unchanged).
+const SchemaVersion = "1.5.0"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

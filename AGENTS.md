@@ -301,7 +301,85 @@ trond network destroy pn --confirm pn -o json
 
 ---
 
-## Workflow 5 — Build java-tron from source
+## Workflow 5 — Shadow-fork testing on a real snapshot
+
+Use when the user wants to test a hard-fork proposal, a witness-set
+transition, or a contract-state migration against realistic
+mainnet/Nile state — without affecting the real network. Takes a
+chain DB snapshot, surgically replaces the witness set + funds test
+accounts + tweaks DynamicProperties timestamps, then launches a
+private network from the modified state.
+
+The mutation engine is a Go port of java-tron's `DbFork` toolkit
+(equivalence test runs in CI against a real Nile snapshot to prove
+byte-equivalence). Both HOCON and YAML fork.conf formats accepted.
+
+```bash
+# 1. Pull a Nile snapshot. Mainnet works too; Nile is lighter and
+#    faster for the demo path.
+trond snapshot download --network nile --type lite \
+    --to /srv/shadow-fork -o json
+
+# 2. The node owning the data dir MUST be stopped before mutate
+#    (LevelDB locks are exclusive). If you just downloaded a fresh
+#    snapshot, no node is running — skip this. Otherwise:
+trond stop <node> -o json
+# Output: {"name":"<node>","previous_state":"running","new_state":"stopped",...}
+
+# 3. Apply the fork.conf — replace witnesses, fund accounts, set
+#    TRC10/TRC20 balances, adjust timestamps. The mutation is
+#    in-place and idempotent (re-runs against the same conf
+#    produce the same on-disk state).
+trond shadow-fork mutate \
+    -d /srv/shadow-fork/output-directory \
+    -c fork.conf -o json
+# Output: {"witnesses_written":1, "active_witnesses":1,
+#          "accounts_modified":1, "trc20_slots_updated":0,
+#          "properties_updated":3, "duration_ms":...}
+
+# 4. Launch a private shadow-fork node off the mutated dir. The
+#    intent MUST use `network: nile` (the snapshot's genesis hash
+#    must match the base config) AND isolate via:
+#    - network_overrides.need_sync_check: false
+#    - config_overrides."seed.node.ip.list": []
+#    - config_overrides."node.p2p.version": 99999  (foreign chain)
+trond apply --intent shadow-fork-intent.yaml --auto-approve --wait -o json
+
+# 5. Verify the shadow chain is producing blocks. Single-witness
+#    setups produce a block every 3s (every slot is that witness's).
+trond status <node> -o json
+# Output: latest_block_number climbs each invocation.
+```
+
+See `knowledge/shadow-fork-poc.md` + `examples/shadow-fork/` for
+the full walkthrough including the witness-keypair generation step
+(tronpy) + the canonical fork.conf template. `scripts/poc-shadow-fork.sh`
+orchestrates the whole flow.
+
+### Key invariants
+
+- **fork.conf is the contract**. Per-section semantics live in
+  `internal/dbfork/{witnesses,accounts,trc20,properties}.go` and
+  mirror java DbFork verbatim. Operators reading the conf in either
+  HOCON or YAML get identical Config shapes.
+- **Genesis hash must match**. The shadow-fork intent's `network:`
+  determines the base config's genesis block. A Nile snapshot
+  requires `network: nile`; a mainnet snapshot requires
+  `network: mainnet`. Mismatch crash-loops the container with
+  `Genesis block modify, please delete database directory`.
+- **The node must be stopped** before mutate. `shadow_fork_mutate`
+  fails loudly with `resource temporarily unavailable` if a
+  process holds the LevelDB lock — but the failure is mid-mutation
+  and may leave partial writes. Always `trond stop` first.
+- **Single-witness setups produce blocks but lack finality**. The
+  per-block SR confirmation count stays at 1 (well below the 19/27
+  threshold). Good enough to verify mutations applied; not
+  sufficient for testing finality-dependent contract logic. Real
+  shadow-fork production parity uses 27 witnesses.
+
+---
+
+## Workflow 6 — Build java-tron from source
 
 Use when the user wants a custom build: a fork, an unreleased patch,
 a wired-in profiler. The build pipeline is content-addressed by
@@ -534,7 +612,7 @@ Configure once in your client. Example for Claude Desktop
 }
 ```
 
-The server registers 19 tools (read-only unless marked):
+The server registers 20 tools (read-only unless marked):
 
 - **inspection** (3): `list`, `status`, `inspect`
 - **diagnostic** (4): `doctor`, `version`, `health`, `diagnose`
@@ -546,7 +624,10 @@ The server registers 19 tools (read-only unless marked):
 - **build** (3): `build_list`, `build_inspect`, `build_prune`
   (destructive — dry-run by default; `confirm=true` actually deletes).
   Build *execution* is NOT exposed via MCP; call the CLI directly
-  for that (see Workflow 5).
+  for that (see Workflow 6).
+- **shadow-fork** (1): `shadow_fork_mutate` (destructive — mutates a
+  halted java-tron data dir in place; see Workflow 5 for the full
+  recipe).
 
 Destructive tools carry the MCP `destructiveHint` annotation so MCP
 clients prompt the user. The server's `Instructions` field

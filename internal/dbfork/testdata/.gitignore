@@ -1,0 +1,4 @@
+# The actual fixture dir is ~10-30 GB — keep it out of git. Regenerate
+# via scripts/build-nile-fixture.sh; consumed by the dbfork equivalence
+# test (Task #152). See README.md for details.
+nile-fixture/

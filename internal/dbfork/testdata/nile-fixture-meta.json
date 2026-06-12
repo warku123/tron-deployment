@@ -1,0 +1,33 @@
+{
+  "_comment": "Manifest schema for the Nile testnet equivalence-test fixture. This file is a SCHEMA placeholder — actual values get filled in when scripts/build-nile-fixture.sh runs against a real snapshot. Fields:",
+  "_schema": {
+    "network": "always \"nile\" for this fixture",
+    "snapshot_kind": "\"lite\" | \"full\" — lite is sufficient for dbfork equivalence",
+    "upstream_backup": "the trond snapshot --backup ID used as the canonical pin",
+    "block_height": "block number at which the snapshot was taken",
+    "generated_at": "ISO 8601 UTC timestamp of fixture generation",
+    "generated_by": "user@host that ran the script",
+    "stores": "map of store-name → SHA256 hex over sorted file list",
+    "consumed_by": "the test that reads this fixture",
+    "regenerate": "shell command to reproduce"
+  },
+  "_placeholder_until_first_sync": true,
+  "network": "nile",
+  "snapshot_kind": "lite",
+  "upstream_backup": null,
+  "block_height": null,
+  "generated_at": null,
+  "generated_by": null,
+  "stores": {
+    "account": null,
+    "account-asset": null,
+    "asset-issue-v2": null,
+    "contract": null,
+    "properties": null,
+    "storage-row": null,
+    "witness": null,
+    "witness_schedule": null
+  },
+  "consumed_by": "internal/dbfork/equivalence_test.go (Task #152)",
+  "regenerate": "NILE_BACKUP=<backup_id> ./scripts/build-nile-fixture.sh"
+}

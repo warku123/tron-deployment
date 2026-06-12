@@ -212,6 +212,23 @@ func applyPortOverrides(config string, node *intent.NodeSpec) string {
 	if ports.P2P != 0 {
 		config = replaceListenPort(config, ports.P2P)
 	}
+	if ports.JSONRPC != 0 {
+		// Task #165: features.jsonrpc=true used to enable the service but
+		// leave httpFullNodePort commented out, so java-tron fell back to
+		// its internal default 8545 while docker bound the intent's port.
+		// Wiring this here means features.jsonrpc + ports.jsonrpc compose
+		// correctly. ensureJSONRPCEnabled (called from applyFeatureOverrides)
+		// still handles the enable bit; this one handles the port.
+		config = replaceJSONRPCPort(config, ports.JSONRPC)
+	}
+	if ports.Metrics != 0 {
+		// node.metrics.prometheus.port — the metrics endpoint follows the
+		// same shape as jsonrpc: the template ships with a default of 9527
+		// and trond needs to plumb the intent value through. Untested in
+		// production but shipped alongside the JSONRPC fix because the
+		// failure mode would be symmetric.
+		config = replaceMetricsPort(config, ports.Metrics)
+	}
 
 	return config
 }
@@ -223,6 +240,13 @@ func applyFeatureOverrides(config string, node *intent.NodeSpec) string {
 	if features.JSONRPC != nil && *features.JSONRPC {
 		// Ensure jsonrpc block has httpFullNodeEnable = true
 		config = ensureJSONRPCEnabled(config)
+	}
+
+	if features.Metrics != nil && *features.Metrics {
+		// Ensure node.metrics.prometheus.enable = true so the bound
+		// metrics port actually serves data (symmetric to JSONRPC).
+		// No-op on templates without a prometheus block (Nile/private).
+		config = ensureMetricsEnabled(config)
 	}
 
 	return config
@@ -276,6 +300,154 @@ func replaceListenPort(config string, port int) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// replaceJSONRPCPort sets node.jsonrpc.httpFullNodePort to port.
+// The template ships with the line commented out (`# httpFullNodePort
+// = 8545`); we uncomment + set when an intent provides a value. If the
+// line is missing entirely (operator-edited config), we insert one
+// before the closing brace, indented to match the surrounding block
+// so the synthesised line aligns with sibling keys.
+func replaceJSONRPCPort(config string, port int) string {
+	lines := strings.Split(config, "\n")
+	inJSONRPC := false
+	jsonRPCIndent := "" // indent of a sibling key inside the block, for synthesis
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "jsonrpc") && strings.Contains(trimmed, "{") {
+			inJSONRPC = true
+			continue
+		}
+		if !inJSONRPC {
+			continue
+		}
+		// Match both commented and uncommented forms — the default
+		// template has it commented out.
+		uncommented := strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+		if strings.HasPrefix(uncommented, "httpFullNodePort") {
+			indent := lineIndent(line)
+			lines[i] = fmt.Sprintf("%shttpFullNodePort = %d", indent, port)
+			return strings.Join(lines, "\n")
+		}
+		// Capture the indent of the first sibling key seen so the
+		// synthesis path lays the new line down at the same column —
+		// templates with 2-space or 4-space indentation both work.
+		if jsonRPCIndent == "" && trimmed != "" && !strings.HasPrefix(trimmed, "#") && trimmed != "}" {
+			jsonRPCIndent = lineIndent(line)
+		}
+		if trimmed == "}" {
+			// jsonrpc block ended without the key — synthesise it.
+			if jsonRPCIndent == "" {
+				jsonRPCIndent = "    " // fallback when the block was empty
+			}
+			lines[i] = fmt.Sprintf("%shttpFullNodePort = %d\n%s", jsonRPCIndent, port, line)
+			return strings.Join(lines, "\n")
+		}
+	}
+	return config
+}
+
+// replaceMetricsPort sets node.metrics.prometheus.port to port. The key
+// lives at depth 2 inside node.metrics (node.metrics { prometheus {
+// port = N } }), so we count brace depth rather than tracking a pair
+// of boolean flags — the boolean approach broke if prometheus wasn't
+// the first sub-block of node.metrics.
+func replaceMetricsPort(config string, port int) string {
+	lines := strings.Split(config, "\n")
+	depth := 0 // brace depth relative to node.metrics's open brace
+	prometheus := false
+	prometheusDepth := -1
+	inMetrics := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inMetrics {
+			if strings.HasPrefix(trimmed, "node.metrics") && strings.Contains(trimmed, "{") {
+				inMetrics = true
+				depth = 1
+			}
+			continue
+		}
+		// Track brace depth so we know exactly where prometheus opens
+		// and closes regardless of sibling order.
+		opens := strings.Count(line, "{")
+		closes := strings.Count(line, "}")
+		preDepth := depth
+		depth += opens - closes
+		if !prometheus && strings.HasPrefix(trimmed, "prometheus") && opens > 0 {
+			prometheus = true
+			prometheusDepth = preDepth + 1 // depth INSIDE the prometheus block
+			continue
+		}
+		if prometheus && depth >= prometheusDepth && strings.HasPrefix(trimmed, "port") {
+			lines[i] = fmt.Sprintf("%sport = %d", lineIndent(line), port)
+			return strings.Join(lines, "\n")
+		}
+		if prometheus && depth < prometheusDepth {
+			// Walked past the prometheus block without finding `port`.
+			prometheus = false
+			prometheusDepth = -1
+		}
+		if depth == 0 {
+			break // exited node.metrics entirely
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ensureMetricsEnabled sets node.metrics.prometheus.enable = true so a
+// rendered `features.metrics: true` actually serves metrics. Without
+// this, applyFeatureOverrides wired only JSONRPC and left the template's
+// `enable = false` intact — so compose.go bound the metrics port while
+// java-tron published nothing on it. That's the exact symmetric bug
+// #165 fixed for jsonrpc.
+//
+// Same brace-depth walk as replaceMetricsPort. SAFE NO-OP when there is
+// no prometheus block (the Nile/private templates lack one, tracked as
+// #167) — returns the config unchanged rather than synthesising a block,
+// so it never corrupts a template that doesn't support metrics.
+func ensureMetricsEnabled(config string) string {
+	lines := strings.Split(config, "\n")
+	depth := 0
+	prometheus := false
+	prometheusDepth := -1
+	inMetrics := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inMetrics {
+			if strings.HasPrefix(trimmed, "node.metrics") && strings.Contains(trimmed, "{") {
+				inMetrics = true
+				depth = 1
+			}
+			continue
+		}
+		opens := strings.Count(line, "{")
+		closes := strings.Count(line, "}")
+		preDepth := depth
+		depth += opens - closes
+		if !prometheus && strings.HasPrefix(trimmed, "prometheus") && opens > 0 {
+			prometheus = true
+			prometheusDepth = preDepth + 1
+			continue
+		}
+		if prometheus && depth >= prometheusDepth && strings.HasPrefix(trimmed, "enable") {
+			lines[i] = fmt.Sprintf("%senable = true", lineIndent(line))
+			return strings.Join(lines, "\n")
+		}
+		if prometheus && depth < prometheusDepth {
+			prometheus = false
+			prometheusDepth = -1
+		}
+		if depth == 0 {
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// lineIndent returns the leading whitespace (spaces or tabs) of a line.
+// Centralised so each replacer doesn't redo the same slice arithmetic.
+func lineIndent(line string) string {
+	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 }
 
 // ensureJSONRPCEnabled ensures the jsonrpc block has httpFullNodeEnable = true.

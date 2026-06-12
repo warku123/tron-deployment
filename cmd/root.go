@@ -9,6 +9,7 @@ import (
 
 	configCmd "github.com/tronprotocol/tron-deployment/cmd/config"
 	networkCmd "github.com/tronprotocol/tron-deployment/cmd/network"
+	shadowforkCmd "github.com/tronprotocol/tron-deployment/cmd/shadowfork"
 	snapshotCmd "github.com/tronprotocol/tron-deployment/cmd/snapshot"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
@@ -59,6 +60,7 @@ for CI pipelines and AI agents.`,
 func init() {
 	rootCmd.AddCommand(configCmd.Cmd)
 	rootCmd.AddCommand(networkCmd.Cmd)
+	rootCmd.AddCommand(shadowforkCmd.Cmd)
 	rootCmd.AddCommand(snapshotCmd.Cmd)
 
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "text", "Output format: text, json")

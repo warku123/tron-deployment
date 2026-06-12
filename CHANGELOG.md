@@ -12,6 +12,35 @@ The agent-ergonomics arc lands across four sequenced PRs:
 **#153** (`trond mcp`) → **#154** (`trond recipe`).
 
 ### Added
+- (#164/#165/#166) Shadow-fork release-gate fixes empirically validated
+  on amd64 + qemu-arm64 EC2 (2026-05-25/26):
+  - `internal/dbfork/db/leveldb.go` Close() now sweeps `.ldb → .sst`
+    and removes `.bak`/`.old` residue so java-tron leveldbjni 1.8 +
+    tronprotocol leveldbjni-all 1.18.2 can read back what dbfork
+    wrote. **Task #164.**
+  - `internal/render/hocon.go` wires `ports.jsonrpc` + `ports.metrics`
+    into HOCON's `httpFullNodePort` and `prometheus.port`. Previously
+    `features.jsonrpc=true` enabled the service but left the port
+    commented at the template default, breaking docker→java-tron
+    port mapping. **Task #165.**
+  - `go.mod` pins `linxGnu/grocksdb` to v1.9.7 (RocksDB 9.7.3) so
+    dbfork's MANIFEST writes are version-compatible with java-tron
+    arm64's rocksdbjni 9.7.4. v1.10.x produced VersionEdit unknown-
+    tag crashes at AccountStore init. **Task #166.** Operators
+    rebuilding `-tags rocksdb` need a fresh `make libs` against the
+    new pin.
+- (#161) Nile snapshot mirror table refreshed —
+  `nile-snapshots.s3-accelerate.amazonaws.com` (403 since at least
+  2026-Q1) replaced by `snapshots.nileex.io`. New
+  `EngineRocksDB` row for the `/rocksdb` prefix so arm64 operators
+  can `trond snapshot download --network nile --type full --db-engine
+  rocksdb`. The structural follow-up is task #161-cron in the
+  `feat/snapshot-sources-probe` branch.
+- (#163-followup) `.github/workflows/dbfork-equivalence.yml` runs
+  `TestEquivalence_GoVsJava` on every PR touching `internal/dbfork`
+  + weekly cron + manual dispatch. Builds the java toolkit's
+  shadowJar on demand and caches a Nile fixture week-to-week. This
+  is the byte-for-byte Go-vs-Java release gate.
 - (#156) JSON Schemas for `trond recipe list / show / run` outputs
   (`schemas/output/recipe-{list,show,run}.schema.json`). Closes the
   schema-coverage gap left by #154 — `trond schema "recipe run"
