@@ -154,6 +154,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			LastApplied: time.Now().UTC(),
 			HTTPPort:    node.Ports.HTTP,
 			GRPCPort:    node.Ports.GRPC,
+			P2PPort:     node.Ports.P2P,
 			Labels:      node.Labels,
 		}
 		store.UpsertNode(deployState, mn)

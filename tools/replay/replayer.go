@@ -8,6 +8,8 @@ import (
 	"log"
 	"sync/atomic"
 	"time"
+
+	"github.com/tronprotocol/tron-deployment/tools/common/broadcast"
 )
 
 const (
@@ -32,7 +34,7 @@ const (
 type Replayer struct {
 	cfg       Config
 	trongrid  *TronGridClient
-	private   *PrivateNodeClient
+	private   *broadcast.Client
 	state     ReplayState
 	skipTypes map[string]struct{}
 	failLog   *jsonlLogger
@@ -305,7 +307,7 @@ func (r *Replayer) processTx(ctx context.Context, blockNum int64, tx json.RawMes
 		})
 		return
 	}
-	ok, msg := r.private.broadcast(ctx, tx)
+	ok, msg := r.private.Broadcast(ctx, tx)
 	if ok {
 		atomic.AddInt64(&r.state.TotalBroadcastOk, 1)
 	} else {

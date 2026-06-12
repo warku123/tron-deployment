@@ -41,7 +41,7 @@ endif
 
 GOFLAGS    ?=
 
-.PHONY: build test lint e2e build-all clean clean-all fmt vet tidy sync-templates sync-schemas sync-knowledge snapshot-schema-baseline update-render-golden docs man cover vuln bootstrap-go build-replay install-replay
+.PHONY: build test lint e2e build-all clean clean-all fmt vet tidy sync-templates sync-schemas sync-knowledge snapshot-schema-baseline update-render-golden docs man cover vuln bootstrap-go build-replay install-replay build-txgen install-txgen
 
 ## bootstrap-go: Download + verify the project-local Go toolchain
 ##               (idempotent; safe to re-run; no-op if already current)
@@ -187,3 +187,18 @@ build-replay: $(GO_BOOTSTRAP)
 install-replay: build-replay
 	cp bin/replay $(GOBIN)/replay
 	@echo "✓ replay installed at $(GOBIN)/replay"
+
+## build-txgen: Build the tools/txgen binary into bin/txgen.
+##              txgen is a standalone Go binary (no java-tron source
+##              dependency) that generates + broadcasts synthetic TRON
+##              transactions (TRX / TRC10 / TRC20) for stress testing.
+##              See tools/txgen/README.md.
+build-txgen: $(GO_BOOTSTRAP)
+	@mkdir -p bin
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/txgen ./tools/txgen
+	@echo "✓ bin/txgen built"
+
+## install-txgen: Build + copy bin/txgen into $(GOBIN).
+install-txgen: build-txgen
+	cp bin/txgen $(GOBIN)/txgen
+	@echo "✓ txgen installed at $(GOBIN)/txgen"

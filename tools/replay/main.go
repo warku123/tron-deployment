@@ -14,17 +14,18 @@
 //
 // Usage: see README.md in this directory.
 //
-// Dependencies: Go standard library only.
+// Dependencies: Go standard library + tools/common/broadcast.
 // Go version: 1.21+
 //
 // File layout:
 //   - main.go      entry point, CLI flags, Config
 //   - state.go     state file read/write
 //   - trongrid.go  TronGrid API client
-//   - private.go   private chain broadcast client
 //   - filter.go    transaction filter rules
 //   - logger.go    JSONL logger
 //   - replayer.go  main loop, pacing control
+//
+// HTTP broadcast lives in tools/common/broadcast (shared with txgen).
 package main
 
 import (
@@ -36,6 +37,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/tronprotocol/tron-deployment/tools/common/broadcast"
 )
 
 // Config is the runtime configuration parsed from CLI flags + env vars.
@@ -132,7 +135,7 @@ func run() error {
 	r := &Replayer{
 		cfg:       cfg,
 		trongrid:  newTronGridClient(cfg.TrongridURL, cfg.TrongridKey, cfg.TrongridQPS),
-		private:   newPrivateNodeClient(cfg.PrivateNode),
+		private:   broadcast.New(cfg.PrivateNode),
 		state:     loadState(cfg.StateFile),
 		skipTypes: skipTypes,
 		failLog:   failLog,

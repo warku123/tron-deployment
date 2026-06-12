@@ -3,6 +3,7 @@ package network
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -107,6 +108,37 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	// Auto-attach the shared docker network so the new node can resolve
+	// sibling container names for P2P peering. Without this it lands only
+	// on its per-compose bridge and stays at 0 peers.
+	sharedNet := "trond-" + addNetworkName
+	if !slices.Contains(node.Networks, sharedNet) {
+		node.Networks = append(node.Networks, sharedNet)
+	}
+
+	// Auto-populate active_peers from existing nodes in the network so the
+	// new node can dial into the running mesh. P2P connections are
+	// bidirectional once established, so we only update the new node —
+	// no need to reconfigure (and restart) existing siblings, they'll
+	// accept the incoming connection. Skip nodes whose P2PPort is zero
+	// (legacy state predating the field) and skip when the user
+	// explicitly supplied active_peers in the intent.
+	if node.NetworkOverrides.ActivePeers == nil {
+		var existingPeers []string
+		for _, n := range deployState.Nodes {
+			if !strings.HasPrefix(n.Name, prefix) {
+				continue
+			}
+			if n.P2PPort == 0 {
+				continue
+			}
+			existingPeers = append(existingPeers, fmt.Sprintf("%s:%d", n.Name, n.P2PPort))
+		}
+		if len(existingPeers) > 0 {
+			node.NetworkOverrides.ActivePeers = &existingPeers
+		}
+	}
+
 	templateDir := findTemplatesDir()
 	hocon, err := render.RenderHOCON(templateDir, parsed, node)
 	if err != nil {
@@ -149,6 +181,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		LastApplied: time.Now().UTC(),
 		HTTPPort:    node.Ports.HTTP,
 		GRPCPort:    node.Ports.GRPC,
+		P2PPort:     node.Ports.P2P,
 		InstallPath: node.InstallPath,
 		Labels:      node.Labels,
 	})

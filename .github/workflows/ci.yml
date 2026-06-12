@@ -28,6 +28,7 @@ jobs:
         with:
           go-version: "1.25"
           cache: true
+          check-latest: true
       # We compile golangci-lint with the project's own Go toolchain via
       # GOTOOLCHAIN. Released v1 binaries are pinned to go1.22 in their
       # module so a pre-built install errors out with "Go language
@@ -35,7 +36,7 @@ jobs:
       # Go version" against any project on a newer Go.
       - name: Install golangci-lint
         env:
-          GOTOOLCHAIN: go1.25.9
+          GOTOOLCHAIN: go1.25.11
         run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
       - name: Run golangci-lint
         run: golangci-lint run --timeout=5m ./...
@@ -49,6 +50,7 @@ jobs:
         with:
           go-version: "1.25"
           cache: true
+          check-latest: true
       - name: go vet
         run: go vet ./...
       - name: Unit tests with coverage
@@ -75,6 +77,7 @@ jobs:
         with:
           go-version: "1.25"
           cache: true
+          check-latest: true
       - name: Run govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -147,6 +150,7 @@ jobs:
         with:
           go-version: "1.25"
           cache: true
+          check-latest: true
       - name: Build ${{ matrix.target.os }}/${{ matrix.target.arch }}
         env:
           GOOS: ${{ matrix.target.os }}

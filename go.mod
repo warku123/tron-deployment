@@ -2,9 +2,11 @@ module github.com/tronprotocol/tron-deployment
 
 go 1.25.0
 
-toolchain go1.25.9
+toolchain go1.25.11
 
 require (
+	github.com/cloudflare/circl v1.6.3
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/gurkankaymak/hocon v1.2.23
 	github.com/linxGnu/grocksdb v1.9.7

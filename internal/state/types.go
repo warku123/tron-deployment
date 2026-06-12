@@ -22,6 +22,10 @@ type ManagedNode struct {
 	// fields — callers must fall back to defaults when zero.
 	HTTPPort int `json:"http_port,omitempty"`
 	GRPCPort int `json:"grpc_port,omitempty"`
+	// P2PPort is the listen.port a sibling can dial to peer with this node.
+	// `network add` reads it from every existing entry to populate the new
+	// node's active_peers so it can immediately join the P2P mesh.
+	P2PPort int `json:"p2p_port,omitempty"`
 	// Labels mirror intent.NodeSpec.Labels and survive across CLI sessions
 	// so test harnesses can filter via `trond list --label key=value`
 	// without touching the original intent file.
