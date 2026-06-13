@@ -231,6 +231,7 @@ while true; do
   sleep 60
 done
 # Or stream progress:  trond snapshot logs <job_id> -f
+# Cancel a running detached job:  trond snapshot stop <job_id> -o json
 
 # 5. Once done, the chain DB sits at <dest>/output-directory/database.
 #    Now apply with an intent whose storage.data points there.
@@ -612,14 +613,22 @@ Configure once in your client. Example for Claude Desktop
 }
 ```
 
-The server registers 20 tools (read-only unless marked):
+The server registers 23 tools (read-only unless marked):
 
 - **inspection** (3): `list`, `status`, `inspect`
 - **diagnostic** (4): `doctor`, `version`, `health`, `diagnose`
-- **config** (2): `config_validate`, `config_render`
+- **config** (3): `config_validate`, `config_render`, `verify_config`
+  (read-only — pulls the live node's `.conf`, renders fresh HOCON from
+  `--intent`, returns `diffs[]`; a cheap reconcile signal before
+  deciding whether `apply` is warranted)
+- **remediation** (1): `auto_heal` (destructive — runs the diagnostic
+  suite then applies only safe, idempotent fixes to fail checks, e.g.
+  start a stopped node; everything else surfaces in `skipped[]` with a
+  human suggestion. Pass `dry_run=true` to propose without acting)
 - **lifecycle** (2): `plan`, `apply` (destructive)
 - **snapshot** (4): `snapshot_sources`, `snapshot_list`, `snapshot_jobs`,
-  `snapshot_download` (destructive, emits MCP progress notifications)
+  `snapshot_download` (destructive, emits MCP progress notifications).
+  Job control (`snapshot stop`, `snapshot logs`) is CLI-only.
 - **knowledge** (2): `knowledge_list`, `knowledge_get`
 - **build** (3): `build_list`, `build_inspect`, `build_prune`
   (destructive — dry-run by default; `confirm=true` actually deletes).
@@ -628,6 +637,22 @@ The server registers 20 tools (read-only unless marked):
 - **shadow-fork** (1): `shadow_fork_mutate` (destructive — mutates a
   halted java-tron data dir in place; see Workflow 5 for the full
   recipe).
+
+The server also registers 4 **prompts** — pre-filled playbooks an MCP
+client surfaces as slash-commands / suggested actions. Each orchestrates
+the tools above into a guided multi-step workflow:
+
+- `deploy_fullnode` — validate → preflight → plan → apply → verify a
+  single node from an intent path (Workflow 1).
+- `setup_private_network` — bring up a multi-node private network from a
+  multi-node intent (Workflow 4).
+- `diagnose_failing_node` — the Workflow 2 decision tree as a prompt
+  (status → logs → health → diagnose → suggested fix).
+- `recover_failed_upgrade` — roll a node back to its last-good config
+  after a bad apply.
+
+Prompts are scaffolding, not new capability — they wrap the same tools,
+so an agent that prefers raw tool calls can ignore them.
 
 Destructive tools carry the MCP `destructiveHint` annotation so MCP
 clients prompt the user. The server's `Instructions` field
