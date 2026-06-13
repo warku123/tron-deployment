@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/dbfork/db"
 	pb "github.com/tronprotocol/tron-deployment/internal/dbfork/proto/pb"
 	"github.com/tronprotocol/tron-deployment/internal/dbfork/stores"
+	"github.com/tronprotocol/tron-deployment/internal/fsclone"
 )
 
 // equivalenceEnv is the set of environment variables that gate the
@@ -104,8 +104,22 @@ func TestEquivalence_GoVsJava(t *testing.T) {
 	// identical 8 (DbFork.java:120-127) and nothing else. So copying
 	// only AllStores is provably sufficient AND cuts each scratch copy
 	// from ~90 GB to a few GB.
-	scratchGo := t.TempDir()
-	scratchJava := t.TempDir()
+	// Scratch dirs live ADJACENT to the fixture (same filesystem), NOT
+	// under t.TempDir(). t.TempDir() resolves under os.TempDir()
+	// (/var/folders, /tmp), which is frequently a different filesystem
+	// than the cached fixture — and a copy-on-write clone across
+	// filesystems fails with EXDEV and silently degrades to a full byte
+	// copy. Co-locating scratch with the fixture is what lets
+	// fsclone.CloneDir actually reflink; otherwise the optimization fires
+	// nowhere (Task #185 review, Codex finding #4).
+	fixtureParent := filepath.Dir(fixturePath)
+	scratchRoot, err := os.MkdirTemp(fixtureParent, "dbfork-scratch-*")
+	if err != nil {
+		t.Fatalf("equivalence: create scratch root adjacent to fixture: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(scratchRoot) })
+	scratchGo := filepath.Join(scratchRoot, "go")
+	scratchJava := filepath.Join(scratchRoot, "java")
 	t.Logf("equivalence: scratchGo=%s scratchJava=%s", scratchGo, scratchJava)
 	for _, dst := range []string{scratchGo, scratchJava} {
 		for _, store := range stores.AllStores {
@@ -117,9 +131,11 @@ func TestEquivalence_GoVsJava(t *testing.T) {
 				t.Logf("equivalence: store %q absent in fixture, skipping copy: %v", store, statErr)
 				continue
 			}
-			if err := copyDir(src, filepath.Join(dst, "database", store)); err != nil {
-				t.Fatalf("equivalence: copy store %q to %s: %v", store, dst, err)
+			method, cloneErr := fsclone.CloneDir(src, filepath.Join(dst, "database", store))
+			if cloneErr != nil {
+				t.Fatalf("equivalence: materialise store %q to %s: %v", store, dst, cloneErr)
 			}
+			t.Logf("equivalence: %s/%s materialised via %s", filepath.Base(dst), store, method)
 		}
 	}
 
@@ -597,50 +613,10 @@ func sortedHexKeys(m map[string][]byte) []string {
 	return out
 }
 
-// copyDir recursively copies src into dst, creating dst if missing.
-// Used to lay down two independent mutable scratch copies of the
-// Nile fixture. Symlinks are followed; permissions preserved.
-func copyDir(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(src, path)
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			return os.MkdirAll(target, info.Mode().Perm())
-		}
-		return copyFile(path, target)
-	})
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	info, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return nil
-}
+// Fixture materialisation (CoW clone with byte-copy fallback) lives in
+// internal/fsclone now — see fsclone.CloneDir, exercised above. The
+// former test-local cloneDir/copyDir/copyFile were lifted there so there
+// is a single clone+copy implementation (Task #185 review, DRY).
 
 // --- Diff-helper unit tests ----------------------------------------------
 //
@@ -835,41 +811,12 @@ func TestKeysOnlyIn_ReturnsDifference(t *testing.T) {
 	}
 }
 
-// TestCopyDir_RoundTrip is a tiny round-trip: write a few files into
-// tmpA, copy to tmpB, verify identical contents. Catches a regression
-// in the filepath.WalkDir loop without needing the multi-GB Nile
-// fixture.
-func TestCopyDir_RoundTrip(t *testing.T) {
-	src := t.TempDir()
-	dst := filepath.Join(t.TempDir(), "copy")
-	files := map[string][]byte{
-		"a.txt":          []byte("alpha"),
-		"sub/b.txt":      []byte("bravo"),
-		"sub/deep/c.txt": []byte("charlie"),
-	}
-	for name, content := range files {
-		full := filepath.Join(src, name)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, content, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := copyDir(src, dst); err != nil {
-		t.Fatalf("copyDir: %v", err)
-	}
-	for name, want := range files {
-		got, err := os.ReadFile(filepath.Join(dst, name))
-		if err != nil {
-			t.Errorf("read %s: %v", name, err)
-			continue
-		}
-		if !bytes.Equal(got, want) {
-			t.Errorf("%s: got %q, want %q", name, got, want)
-		}
-	}
-}
+// Round-trip + independence + forced-fallback coverage for the fixture
+// clone now lives with the implementation in internal/fsclone
+// (TestCloneDir_RoundTrip, TestCloneDir_ForcedFallback,
+// TestRecursiveCopy_RoundTrip). Keeping the tests next to CloneDir means
+// the seam that forces the byte-copy fallback can be exercised
+// deterministically on any host — see Task #185.
 
 // Note: the "skip cleanly when env vars missing" path is exercised
 // by every `go test ./...` run on a machine without the Java toolkit
