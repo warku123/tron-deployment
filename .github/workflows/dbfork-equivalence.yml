@@ -191,6 +191,33 @@ jobs:
           ls -1 "$DB"
           df -h . | tail -1
 
+      - name: Probe copy-on-write support on the fixture filesystem
+        # internal/fsclone.CloneDir reflinks the fixture into adjacent
+        # scratch dirs to avoid a multi-GB byte copy per run. That only
+        # speeds up the gate if the runner's filesystem actually supports
+        # copy-on-write — GitHub's ext4 runners usually do NOT, in which
+        # case CloneDir silently falls back to a full copy. This probe
+        # makes the difference observable instead of guessing: it logs the
+        # device IDs of the fixture vs the scratch parent (a mismatch ⇒
+        # cross-device ⇒ EXDEV ⇒ no reflink) and the result of a real
+        # `cp --reflink=always`. Non-blocking: it never fails the job, it
+        # just tells us whether the optimization fired. (Task #185 / #186.)
+        if: always()
+        run: |
+          set -uo pipefail
+          DB="${{ github.workspace }}/nile-fixture/output-directory"
+          if [ ! -d "$DB" ]; then echo "fixture dir absent, skipping probe"; exit 0; fi
+          echo "fixture device : $(stat -c '%d' "$DB" 2>/dev/null || echo '?')  ($(stat -f -c '%T' "$DB" 2>/dev/null || echo '?'))"
+          echo "scratch device : $(stat -c '%d' "$(dirname "$DB")" 2>/dev/null || echo '?')  (scratch is created adjacent to the fixture, so this should match)"
+          probe="$DB/.cow-probe"
+          head -c 1048576 /dev/zero > "$probe" 2>/dev/null || true
+          if cp --reflink=always "$probe" "$probe.clone" 2>/dev/null; then
+            echo "REFLINK: SUPPORTED on the fixture filesystem — CloneDir will copy-on-write (gate is fast)"
+          else
+            echo "REFLINK: NOT supported on the fixture filesystem — CloneDir falls back to byte copy (gate is as slow as before; the optimization only helps on CoW filesystems)"
+          fi
+          rm -f "$probe" "$probe.clone" 2>/dev/null || true
+
       - name: Run equivalence test
         env:
           DBFORK_NILE_FIXTURE: ${{ github.workspace }}/nile-fixture/output-directory
