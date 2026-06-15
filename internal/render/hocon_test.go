@@ -247,22 +247,84 @@ func TestRenderHOCON_MetricsFeatureEnables(t *testing.T) {
 		}
 	})
 
-	t.Run("nile no prometheus block is a safe no-op", func(t *testing.T) {
+	// Since #167 the nile and private templates ship the same
+	// node.metrics.prometheus block as mainnet (enable = false by
+	// default), so features.metrics flips them on too — the feature is
+	// no longer a silent no-op on those networks.
+	for _, network := range []string{"nile", "private"} {
+		t.Run(network+" flips enable=true", func(t *testing.T) {
+			out, err := RenderHOCON("", &intent.Intent{
+				Name: "m", Network: network, Target: intent.Target{Type: "local"},
+			}, &intent.NodeSpec{
+				Type:     "fullnode",
+				Features: intent.Features{Metrics: &enabled},
+				Ports:    intent.PortMapping{Metrics: 59527},
+			})
+			if err != nil {
+				t.Fatalf("render %s: %v", network, err)
+			}
+			prom := prometheusBlock(t, out)
+			if !strings.Contains(prom, "enable = true") {
+				t.Errorf("%s prometheus.enable not flipped to true; block was:\n%s", network, prom)
+			}
+			if strings.Contains(prom, "enable = false") {
+				t.Errorf("%s prometheus.enable left false despite features.metrics=true; block:\n%s", network, prom)
+			}
+		})
+	}
+
+	t.Run("default off when metrics feature absent", func(t *testing.T) {
+		// Without features.metrics the template default must stand —
+		// prometheus block present (so monitoring/features can later flip
+		// it) but enable = false, so we never expose /metrics unasked.
 		out, err := RenderHOCON("", &intent.Intent{
 			Name: "m", Network: "nile", Target: intent.Target{Type: "local"},
-		}, &intent.NodeSpec{
-			Type:     "fullnode",
-			Features: intent.Features{Metrics: &enabled},
-		})
+		}, &intent.NodeSpec{Type: "fullnode"})
 		if err != nil {
 			t.Fatalf("render nile: %v", err)
 		}
-		// Nile template has no prometheus block; render must not have
-		// synthesised a stray `enable = true` line.
-		if strings.Contains(out, "prometheus") {
-			t.Error("nile render unexpectedly contains a prometheus block")
+		prom := prometheusBlock(t, out)
+		if !strings.Contains(prom, "enable = false") {
+			t.Errorf("nile prometheus.enable should default to false; block:\n%s", prom)
 		}
 	})
+}
+
+// TestRenderHOCON_MetricsAndMonitoringIdempotent pins that setting BOTH
+// features.metrics and monitoring.enabled yields a SINGLE
+// node.metrics.prometheus block with enable=true — never a duplicate.
+// RenderHOCON runs ensureMetricsEnabled (features path) and then
+// ensureMetricsForMonitoring (monitoring path) over the same config; now
+// that every template ships the block (#167) both just flip the existing
+// `enable` line, so they compose idempotently. This guards the
+// interaction across the planned merge of the two functions into one.
+func TestRenderHOCON_MetricsAndMonitoringIdempotent(t *testing.T) {
+	en := true
+	for _, network := range []string{"nile", "private", "mainnet"} {
+		t.Run(network, func(t *testing.T) {
+			out, err := RenderHOCON("", &intent.Intent{
+				Name: "m", Network: network, Target: intent.Target{Type: "local"},
+				Monitoring: &intent.Monitoring{Enabled: &en},
+			}, &intent.NodeSpec{
+				Type:     "fullnode",
+				Features: intent.Features{Metrics: &en},
+				Ports:    intent.PortMapping{Metrics: 59527},
+			})
+			if err != nil {
+				t.Fatalf("render %s: %v", network, err)
+			}
+			if n := strings.Count(out, "node.metrics"); n != 1 {
+				t.Errorf("%s: want exactly one node.metrics block, got %d", network, n)
+			}
+			if n := strings.Count(out, "prometheus {"); n != 1 {
+				t.Errorf("%s: want exactly one prometheus block, got %d", network, n)
+			}
+			prom := prometheusBlock(t, out)
+			if !strings.Contains(prom, "enable = true") {
+				t.Errorf("%s: prometheus.enable not true with both flags set; block:\n%s", network, prom)
+			}
+		})
+	}
 }
 
 func TestRenderHOCON_UnknownNetwork(t *testing.T) {
