@@ -141,38 +141,53 @@ jobs:
           restore-keys: |
             nile-fixture-
 
-      - name: Build trond + download Nile fixture (if cache miss)
-        if: steps.fixture-cache.outputs.cache-hit != 'true'
+      - name: Build trond + download Nile fixture (if absent)
+        # Guard on whether the fixture is actually PRESENT, not on
+        # cache-hit. actions/cache sets cache-hit='true' only on an EXACT
+        # key match; a `restore-keys: nile-fixture-` prefix fallback (the
+        # common case when the weekly key rolls) still restores last
+        # week's fixture into ./nile-fixture but reports cache-hit=false.
+        # The old `if: cache-hit != 'true'` then re-ran the download into
+        # a dir that already had a database, and `snapshot download`
+        # (correctly) refuses to clobber without --force → exit 10
+        # HUMAN_REQUIRED. Any restored snapshot is fine for equivalence
+        # (both Go and Java diff the same copy), so: present → use it;
+        # absent → cold download + prune.
         run: |
           set -euo pipefail
-          go build -o bin/trond ./
-          ./bin/trond snapshot download \
-            --network nile --type lite \
-            --to ./nile-fixture
-          # snapshot download streams gunzip|tar straight to disk and
-          # never persists the .tgz, so there is nothing to clean up
-          # here. Guard that the extracted layout the test expects
-          # actually materialised, so a future download-format change
-          # fails here instead of as a confusing SKIP downstream.
           DB=./nile-fixture/output-directory/database
-          test -d "$DB" \
-            || { echo "::error::fixture missing output-directory/database after download"; exit 1; }
-          # Prune to the 8 dbfork stores. A full Nile snapshot is ~90 GB,
-          # dominated by block/trans/pbft-sign-data which dbfork never
-          # touches — java DbFork's initStore() and Go's Apply open only
-          # these 8 stores. The test makes TWO scratch copies, so keeping
-          # the bulk overflowed the runner disk ("no space left on
-          # device"). Pruning frees ~40+ GB and is what gets cached, so
-          # cache-hit runs are already lean.
-          KEEP="witness witness_schedule account properties asset-issue-v2 account-asset contract storage-row"
-          for d in "$DB"/*/; do
-            name=$(basename "$d")
-            case " $KEEP " in
-              *" $name "*) : ;;          # keep the 8 dbfork stores
-              *) rm -rf "$d" ;;          # drop everything else
-            esac
-          done
-          echo "Pruned fixture to dbfork stores; remaining:"
+          if [ -d "$DB" ]; then
+            echo "Fixture already present (exact or restore-keys cache hit); skipping download + prune."
+          else
+            go build -o bin/trond ./
+            ./bin/trond snapshot download \
+              --network nile --type lite \
+              --to ./nile-fixture
+            # snapshot download streams gunzip|tar straight to disk and
+            # never persists the .tgz, so there is nothing to clean up
+            # here. Guard that the extracted layout the test expects
+            # actually materialised, so a future download-format change
+            # fails here instead of as a confusing SKIP downstream.
+            test -d "$DB" \
+              || { echo "::error::fixture missing output-directory/database after download"; exit 1; }
+            # Prune to the 8 dbfork stores. A full Nile snapshot is ~90 GB,
+            # dominated by block/trans/pbft-sign-data which dbfork never
+            # touches — java DbFork's initStore() and Go's Apply open only
+            # these 8 stores. The test makes TWO scratch copies, so keeping
+            # the bulk overflowed the runner disk ("no space left on
+            # device"). Pruning frees ~40+ GB and is what gets cached, so
+            # the restored fixture on later runs is already lean.
+            KEEP="witness witness_schedule account properties asset-issue-v2 account-asset contract storage-row"
+            for d in "$DB"/*/; do
+              name=$(basename "$d")
+              case " $KEEP " in
+                *" $name "*) : ;;          # keep the 8 dbfork stores
+                *) rm -rf "$d" ;;          # drop everything else
+              esac
+            done
+            echo "Pruned fixture to dbfork stores."
+          fi
+          echo "Fixture stores:"
           ls -1 "$DB"
           df -h . | tail -1
 
