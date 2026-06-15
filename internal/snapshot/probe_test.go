@@ -59,18 +59,18 @@ func TestProbe_OKWhenRecentBackupServes(t *testing.T) {
 }
 
 func TestProbe_StaleWhenOnlyOldBackupServes(t *testing.T) {
-	// A backup older than the staleness threshold but still inside the
-	// generated date list. 35 days back is in the "10/20/30" tier of
-	// generateDateList. To guarantee it lands on a 10/20/30 day, pick a
-	// fixed-but-rolling target.
-	old := time.Now().UTC().AddDate(0, 0, -45)
-	// Snap to the nearest 10/20/30 of that month, going backwards.
-	for d := old.Day(); d > 0; d-- {
-		if d == 10 || d == 20 || d == 30 {
-			old = time.Date(old.Year(), old.Month(), d, 0, 0, 0, 0, time.UTC)
-			break
-		}
-	}
+	// Serve a backup that is older than the 7-day staleness threshold but
+	// still inside generateDateList's DENSE tier — every day within the
+	// first 30 days back is emitted, so a date 15 days back is always a
+	// probe candidate regardless of which calendar day the test runs on,
+	// and 15 > 7 makes it reliably stale.
+	//
+	// The previous logic ("45 days back, snapped backward to the nearest
+	// 10/20/30 day-of-month") was date-dependent and flaked: when
+	// today-45 landed on a day-of-month < 10 the backward snap found no
+	// 10/20/30 day, left the served date on a day generateDateList never
+	// emits, and the probe returned Unreachable instead of Stale.
+	old := time.Now().UTC().AddDate(0, 0, -15)
 	oldStr := old.Format("20060102")
 	src := buildProbeMirror(t, oldStr)
 
