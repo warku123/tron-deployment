@@ -112,6 +112,12 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			"failed to persist state after destroy: "+err.Error())
 	}
 
+	// Remove monitoring stack if it exists (best-effort).
+	monRT := runtime.NewMonitoringRuntime(target.NewLocalTarget(), paths.Deployments())
+	if err := monRT.Remove(cmd.Context(), destroyConfirm, true); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to remove monitoring stack: %v\n", err)
+	}
+
 	// Tear down the shared docker network the matching `network create`
 	// stood up. Best-effort: a leftover network is harmless on next
 	// run (create re-uses it), so we ignore failures rather than

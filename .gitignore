@@ -32,6 +32,9 @@ Thumbs.db
 # trond state (local only)
 # ~/.trond/ is user-local, not in repo
 
+# Compiled binary (project root)
+/trond
+
 # Local Claude Code workspace state
 .claude/
 CLAUDE.md

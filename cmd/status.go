@@ -11,7 +11,10 @@ import (
 
 	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/output"
+	"github.com/tronprotocol/tron-deployment/internal/paths"
+	"github.com/tronprotocol/tron-deployment/internal/runtime"
 	"github.com/tronprotocol/tron-deployment/internal/state"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 var statusCmd = &cobra.Command{
@@ -86,6 +89,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		maps.Copy(statusInfo, liveStatusProbe(ctx, node))
 	}
 
+	if node.Monitoring != nil && node.Monitoring.Enabled {
+		statusInfo["monitoring"] = map[string]any{
+			"prometheus_port": node.Monitoring.PrometheusPort,
+			"grafana_port":    node.Monitoring.GrafanaPort,
+			"status":          probeMonitoringStatus(cmd.Context(), node.Name),
+		}
+	}
+
 	if outputFmt == "json" {
 		return output.WriteJSON(os.Stdout, statusInfo)
 	}
@@ -105,6 +116,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if syn, ok := statusInfo["is_synced"].(bool); ok {
 		fmt.Printf("Synced:       %v\n", syn)
 	}
+
+	// Show monitoring stack health if deployed.
+	if node.Monitoring != nil && node.Monitoring.Enabled {
+		monStatus := probeMonitoringStatus(cmd.Context(), node.Name)
+		fmt.Printf("Monitoring:   %s (prometheus :%d, grafana :%d)\n",
+			monStatus, node.Monitoring.PrometheusPort, node.Monitoring.GrafanaPort)
+	}
+
 	return nil
 }
 
@@ -127,4 +146,16 @@ func liveStatusProbe(ctx context.Context, node *state.ManagedNode) map[string]an
 		defer c.Close()
 	}
 	return apply.LiveStatus(ctx, tgt, node)
+}
+
+// probeMonitoringStatus returns a short health status string for the
+// monitoring stack deployed alongside the named node. Best-effort —
+// returns "unknown" when the stack can't be reached.
+func probeMonitoringStatus(ctx context.Context, name string) string {
+	monRT := runtime.NewMonitoringRuntime(target.NewLocalTarget(), paths.Deployments())
+	status, err := monRT.Status(ctx, name)
+	if err != nil || status == nil {
+		return "unknown"
+	}
+	return status.Status
 }

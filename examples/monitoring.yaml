@@ -1,0 +1,33 @@
+# Example: single fullnode with Prometheus + Grafana monitoring stack.
+# Run:  trond apply --intent examples/monitoring.yaml
+#       trond apply --intent examples/monitoring.yaml --no-monitor  (skip monitoring)
+#
+# Default behaviour:
+#   - Grafana is exposed on port 3000.
+#   - Prometheus is NOT exposed on the host by default; it is reachable
+#     inside the Docker network by Grafana.  To expose Prometheus add
+#     monitoring.prometheus.port explicitly.
+
+name: monitored-node
+
+target:
+  type: local
+  runtime: docker
+
+network: mainnet
+
+monitoring:
+  enabled: true
+  prometheus:
+    # port is omitted → Prometheus is NOT bound to a host port.
+    # Uncomment the line below to expose it (e.g. on 9090):
+    # port: 9090
+    retention: 7d
+  grafana:
+    port: 3000
+
+nodes:
+  - type: fullnode
+    version: latest
+    resources:
+      memory: 8GB

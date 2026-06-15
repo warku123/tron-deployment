@@ -4,7 +4,10 @@
   "title": "trond apply output",
   "description": "Returned by `trond apply --intent ... -o json`. Describes the deployment outcome and the live endpoints, when --wait succeeded.",
   "type": "object",
-  "required": ["name", "result"],
+  "required": [
+    "name",
+    "result"
+  ],
   "properties": {
     "name": {
       "type": "string",
@@ -12,7 +15,11 @@
     },
     "result": {
       "type": "string",
-      "enum": ["created", "updated", "no_change"],
+      "enum": [
+        "created",
+        "updated",
+        "no_change"
+      ],
       "description": "no_change means the intent matches what's already deployed (idempotent re-run); created on first apply; updated when the intent or its rendered config differs from state and --auto-approve was passed."
     },
     "intent_hash": {
@@ -23,19 +30,40 @@
     "config_hash": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
-      "description": "SHA256 of the rendered HOCON config. Same intent → same config_hash unless template changed."
+      "description": "SHA256 of the rendered HOCON config. Same intent \u2192 same config_hash unless template changed."
     },
     "endpoints": {
       "type": "object",
       "description": "Live API endpoints exposed by the running container. Keys vary by node type and which features are enabled.",
       "properties": {
-        "http":     { "type": "string", "format": "uri", "examples": ["http://127.0.0.1:8090"] },
-        "grpc":     { "type": "string",                  "examples": ["127.0.0.1:50051"] },
-        "jsonrpc":  { "type": "string", "format": "uri" },
-        "metrics":  { "type": "string", "format": "uri" },
-        "p2p":      { "type": "string" }
+        "http": {
+          "type": "string",
+          "format": "uri",
+          "examples": [
+            "http://127.0.0.1:8090"
+          ]
+        },
+        "grpc": {
+          "type": "string",
+          "examples": [
+            "127.0.0.1:50051"
+          ]
+        },
+        "jsonrpc": {
+          "type": "string",
+          "format": "uri"
+        },
+        "metrics": {
+          "type": "string",
+          "format": "uri"
+        },
+        "p2p": {
+          "type": "string"
+        }
       },
-      "additionalProperties": { "type": "string" }
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "duration_ms": {
       "type": "integer",
@@ -61,27 +89,91 @@
     },
     "runtime": {
       "type": "string",
-      "enum": ["docker", "jar"],
+      "enum": [
+        "docker",
+        "jar"
+      ],
       "description": "Which runtime was selected based on intent.target.runtime."
     },
     "build": {
       "type": "object",
       "description": "Populated when the intent carried a `build:` block (spec/002). Slice of the full build.Result manifest with the fields a caller most often needs inline. The complete manifest stays under ~/.trond/builds/manifest/<cache_key>.json.",
-      "required": ["cache_key", "source_revision", "dirty", "cache_hit", "duration_ms"],
+      "required": [
+        "cache_key",
+        "source_revision",
+        "dirty",
+        "cache_hit",
+        "duration_ms"
+      ],
       "properties": {
-        "cache_key":       { "type": "string", "pattern": "^[0-9a-f]{12}-b[0-9a-f]{8}(\\+dirty-[0-9a-f]{8})?(-x[0-9a-f]{8})?$" },
-        "source_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "dirty":           { "type": "boolean" },
-        "artifact_path":   { "type": "string" },
-        "image_tag":       { "type": "string" },
-        "sha256":          { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "builder_image":   { "type": "string", "description": "Pinned JDK builder image reference (e.g. eclipse-temurin:8-jdk-jammy@sha256:...) used to produce this artifact." },
-        "platform":        { "type": "string", "enum": ["linux/amd64", "linux/arm64"], "description": "Docker --platform the builder ran under. Identifies the arch this JAR targets per java-tron's compat matrix." },
-        "jdk_version":     { "type": "string", "enum": ["8", "11", "17", "21"], "description": "JDK major version of the builder container. Determines the produced bytecode major version." },
-        "cache_hit":       { "type": "boolean" },
-        "duration_ms":     { "type": "integer", "minimum": 0 }
+        "cache_key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{12}-b[0-9a-f]{8}(\\+dirty-[0-9a-f]{8})?(-x[0-9a-f]{8})?$"
+        },
+        "source_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "artifact_path": {
+          "type": "string"
+        },
+        "image_tag": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "builder_image": {
+          "type": "string",
+          "description": "Pinned JDK builder image reference (e.g. eclipse-temurin:8-jdk-jammy@sha256:...) used to produce this artifact."
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "linux/amd64",
+            "linux/arm64"
+          ],
+          "description": "Docker --platform the builder ran under. Identifies the arch this JAR targets per java-tron's compat matrix."
+        },
+        "jdk_version": {
+          "type": "string",
+          "enum": [
+            "8",
+            "11",
+            "17",
+            "21"
+          ],
+          "description": "JDK major version of the builder container. Determines the produced bytecode major version."
+        },
+        "cache_hit": {
+          "type": "boolean"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
+    },
+    "monitoring_error": {
+      "type": "string",
+      "description": "Error message if monitoring stack deployment failed. Non-fatal."
+    },
+    "monitoring": {
+      "type": "object",
+      "description": "Monitoring stack endpoints when monitoring is enabled.",
+      "properties": {
+        "prometheus_url": {
+          "type": "string"
+        },
+        "grafana_url": {
+          "type": "string"
+        }
+      }
     }
   },
   "additionalProperties": false

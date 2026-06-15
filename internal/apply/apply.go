@@ -41,6 +41,7 @@ import (
 
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
+	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/render"
 	"github.com/tronprotocol/tron-deployment/internal/runtime"
 	"github.com/tronprotocol/tron-deployment/internal/state"
@@ -109,6 +110,14 @@ type Result struct {
 	Ready     *bool  `json:"ready,omitempty"`
 	WaitedMs  int64  `json:"waited_ms,omitempty"`
 	WaitError string `json:"wait_error,omitempty"`
+
+	// MonitoringError is set when the monitoring stack deployment failed.
+	// The node itself deployed successfully; this is a non-fatal warning.
+	MonitoringError string `json:"monitoring_error,omitempty"`
+
+	// MonitoringEndpoints exposes the Prometheus + Grafana URLs when
+	// monitoring was successfully deployed.
+	MonitoringEndpoints map[string]string `json:"monitoring,omitempty"`
 
 	// Build is populated when the intent carried a `build:` block.
 	// Matches the build.Result JSON shape (schemas/output/build.schema.json).
@@ -272,6 +281,9 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("unsupported runtime %q", runtimeType)
 	}
 
+	// Deploy monitoring stack if enabled.
+	monRes := deployMonitoring(ctx, opts, node, runtimeType)
+
 	// Persist into state.
 	managed := state.ManagedNode{
 		Name:       opts.Intent.Name,
@@ -292,6 +304,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		GRPCPort:    node.Ports.GRPC,
 		Labels:      node.Labels,
 		InstallPath: node.InstallPath,
+		Monitoring:  monRes.managed,
 	}
 	outcome := "created"
 	if opts.Existing != nil {
@@ -318,8 +331,10 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 			"http": fmt.Sprintf("http://127.0.0.1:%d", node.Ports.HTTP),
 			"grpc": fmt.Sprintf("127.0.0.1:%d", node.Ports.GRPC),
 		},
-		DurationMs: deployedMs,
-		Build:      buildSummary,
+		DurationMs:          deployedMs,
+		Build:               buildSummary,
+		MonitoringError:     monRes.error,
+		MonitoringEndpoints: monRes.urls,
 	}
 	_ = builtImageTag // consumed by Phase 3 (docker runtime + image artifact)
 
@@ -440,8 +455,21 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 			"http": fmt.Sprintf("http://127.0.0.1:%d", ports.HTTP),
 			"grpc": fmt.Sprintf("127.0.0.1:%d", ports.GRPC),
 		},
-		DurationMs: time.Since(start).Milliseconds(),
-		Build:      buildSummary,
+		DurationMs:          time.Since(start).Milliseconds(),
+		Build:               buildSummary,
+		MonitoringEndpoints: monitoringEndpointsFromExisting(opts.Existing),
+	}
+}
+
+// monitoringEndpointsFromExisting returns monitoring URLs from a managed
+// node's saved state, if monitoring was deployed for it.
+func monitoringEndpointsFromExisting(existing *state.ManagedNode) map[string]string {
+	if existing == nil || existing.Monitoring == nil || !existing.Monitoring.Enabled {
+		return nil
+	}
+	return map[string]string{
+		"prometheus_url": fmt.Sprintf("http://127.0.0.1:%d", existing.Monitoring.PrometheusPort),
+		"grafana_url":    fmt.Sprintf("http://127.0.0.1:%d", existing.Monitoring.GrafanaPort),
 	}
 }
 
@@ -487,4 +515,110 @@ func detectJDK(ctx context.Context, tgt target.Target) int {
 		return 17
 	}
 	return n
+}
+
+// monitoringResult carries the outcome of deployMonitoring back to the
+// Apply caller so it can populate Result and ManagedNode fields.
+type monitoringResult struct {
+	error   string
+	urls    map[string]string
+	managed *state.MonitoringState
+}
+
+// deployMonitoring deploys the Prometheus + Grafana stack if monitoring is
+// enabled in the intent. For docker runtime it co-locates with the node;
+// for jar runtime it deploys to the trond machine (local target).
+func deployMonitoring(ctx context.Context, opts Options, node *intent.NodeSpec, runtimeType string) monitoringResult {
+	if opts.Intent.Monitoring == nil || opts.Intent.Monitoring.Enabled == nil || !*opts.Intent.Monitoring.Enabled {
+		return monitoringResult{}
+	}
+
+	// Build scrape target address.
+	var scrapeAddr string
+	switch runtimeType {
+	case "docker":
+		// Within the docker compose network, use the container name.
+		scrapeAddr = fmt.Sprintf("%s:%d", opts.Intent.Name, node.Ports.Metrics)
+	case "jar":
+		if opts.Intent.Target.Type == "ssh" {
+			scrapeAddr = fmt.Sprintf("%s:%d", opts.Intent.Target.Host, node.Ports.Metrics)
+		} else {
+			scrapeAddr = fmt.Sprintf("127.0.0.1:%d", node.Ports.Metrics)
+		}
+	}
+
+	targets := []render.MonitoringTarget{{
+		Name:    opts.Intent.Name,
+		Address: scrapeAddr,
+		Labels: map[string]string{
+			"group":    "group-tron",
+			"instance": opts.Intent.Name,
+			"network":  opts.Intent.Network,
+		},
+	}}
+
+	// Determine where monitoring runs and which network to attach.
+	var monTarget target.Target
+	var monWorkDir string
+	var networkName string
+	if runtimeType == "jar" && opts.Intent.Target.Type == "ssh" {
+		// Jar + SSH: monitoring runs on the trond machine.
+		monTarget = target.NewLocalTarget()
+		monWorkDir = paths.Deployments()
+	} else {
+		// Docker (local or SSH): monitoring co-locates with the node.
+		monTarget = opts.Target
+		monWorkDir = opts.DeploymentsDir
+		if runtimeType == "docker" {
+			networkName = opts.Intent.Name + "_default"
+		}
+	}
+
+	// Render configs.
+	composeData := render.RenderMonitoringCompose(opts.Intent.Name, opts.Intent, targets, networkName)
+	promConfig := render.RenderPrometheusConfig(targets, opts.Intent.Monitoring.Prometheus.Retention)
+	dsYAML, provYAML := render.RenderGrafanaProvisioning(
+		fmt.Sprintf("http://prometheus:%d", opts.Intent.Monitoring.Prometheus.Port),
+	)
+
+	// Load embedded dashboards.
+	dashboards := make(map[string][]byte)
+	for _, name := range render.DashboardNames() {
+		data, err := render.LoadDashboard(name)
+		if err != nil {
+			continue
+		}
+		dashboards[name] = render.NormalizeDashboard(data)
+	}
+
+	monOpts := runtime.MonitoringDeployOpts{
+		Name:              opts.Intent.Name,
+		ComposeData:       []byte(composeData),
+		PrometheusConfig:  []byte(promConfig),
+		GrafanaDatasource: []byte(dsYAML),
+		GrafanaProvider:   []byte(provYAML),
+		Dashboards:        dashboards,
+	}
+
+	rt := runtime.NewMonitoringRuntime(monTarget, monWorkDir)
+	if err := rt.Deploy(ctx, monOpts); err != nil {
+		return monitoringResult{error: err.Error()}
+	}
+
+	m := opts.Intent.Monitoring
+	urls := map[string]string{
+		"grafana_url": fmt.Sprintf("http://127.0.0.1:%d", m.Grafana.Port),
+	}
+	if m.Prometheus.Port > 0 {
+		urls["prometheus_url"] = fmt.Sprintf("http://127.0.0.1:%d", m.Prometheus.Port)
+	}
+	return monitoringResult{
+		urls: urls,
+		managed: &state.MonitoringState{
+			Enabled:        true,
+			PrometheusPort: m.Prometheus.Port,
+			GrafanaPort:    m.Grafana.Port,
+			TargetType:     opts.Intent.Target.Type,
+		},
+	}
 }

@@ -22,6 +22,7 @@ A command-line tool for deploying, managing, and diagnosing [java-tron](https://
 - **Plan/Apply workflow** -- preview changes before deploying
 - **Structured output** -- JSON output for CI pipelines and AI agents
 - **Built-in diagnostics** -- sync health, peer count, disk, ports, version checks
+- **Built-in monitoring** -- optional Prometheus + Grafana stack with pre-built dashboards
 - **Knowledge base** -- embedded deployment guidance and troubleshooting
 
 ## Install
@@ -328,6 +329,34 @@ Skip the days-long sync from genesis by pulling an official chain database snaps
 | `trond snapshot stop <job-id> [--force]` | SIGTERM (SIGKILL with `--force`) a background download |
 
 `--detach` re-execs trond as a session leader (`Setsid`); the child becomes PPID 1 and survives terminal close. Logs land at `~/.trond/snapshots/<id>.log`. Existing chain data is refused without `--force` (HUMAN_REQUIRED, exit 10); pre-existing `userdata/` is preserved across extraction. `--dry-run` prints the plan (URL, expected size, free space, would-overwrite) without sending a single GET.
+
+### Monitoring
+
+Deploy a Prometheus + Grafana stack alongside your node for visual dashboards. java-tron natively exposes Prometheus metrics on port 9527; trond embeds 5 pre-built Grafana dashboards from tron-docker and wires everything together.
+
+```bash
+# Single node with monitoring
+trond apply --intent node.yaml --monitor
+
+# Multi-node private network with monitoring
+trond network create --intent net.yaml --monitor
+
+# Health check includes monitoring containers
+trond status my-node
+trond network status
+```
+
+| Command | Description |
+|---|---|
+| `trond apply --monitor` | Deploy Prometheus + Grafana alongside the node |
+| `trond network create --monitor` | Deploy a single monitoring stack for the entire network |
+| `trond network add` | Automatically reloads Prometheus config to include the new node |
+| `trond status <node>` / `trond network status` | Shows monitoring container health |
+| `trond remove <node>` / `trond network destroy` | Automatically cleans up the monitoring stack |
+
+After deployment, Grafana is available at http://localhost:3000 (admin/admin) with 5 dashboards: java-tron-server, java-tron-api, java-tron-api-statistic, java-tron-mechanism, and node-exporter-full. Prometheus is at http://localhost:9090.
+
+**Limitations**: The single Prometheus instance loses visibility into nodes isolated by `trond partition`; metrics resume after `trond heal`. Monitoring is Docker-only (Prometheus and Grafana run as containers), so jar-runtime targets need Docker on the trond machine for the monitoring stack.
 
 ### Test-harness SDK
 

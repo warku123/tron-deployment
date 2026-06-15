@@ -285,3 +285,102 @@ func TestReplaceHOCONValue(t *testing.T) {
 		t.Errorf("indentation lost: %q", out)
 	}
 }
+
+func TestEnsureMetricsForMonitoring_ExistingEnableFalse(t *testing.T) {
+	in := `node.metrics {
+  prometheus {
+    enable = false
+    port = 9527
+  }
+}`
+	out := ensureMetricsForMonitoring(in)
+	if !strings.Contains(out, "enable = true") {
+		t.Errorf("expected enable = true, got:\n%s", out)
+	}
+}
+
+func TestEnsureMetricsForMonitoring_NoEnableField(t *testing.T) {
+	in := `node.metrics {
+  prometheus {
+    port = 9527
+  }
+}`
+	out := ensureMetricsForMonitoring(in)
+	if !strings.Contains(out, "enable = true") {
+		t.Errorf("expected enable = true inserted, got:\n%s", out)
+	}
+}
+
+func TestEnsureMetricsForMonitoring_NoPrometheusBlock(t *testing.T) {
+	in := `node.metrics {
+  something = else
+}`
+	out := ensureMetricsForMonitoring(in)
+	if !strings.Contains(out, "prometheus {") || !strings.Contains(out, "enable = true") {
+		t.Errorf("expected prometheus block inserted, got:\n%s", out)
+	}
+}
+
+func TestEnsureMetricsForMonitoring_MissingMetricsBlock(t *testing.T) {
+	in := `some.config = value`
+	out := ensureMetricsForMonitoring(in)
+	if !strings.Contains(out, "node.metrics {") || !strings.Contains(out, "prometheus {") {
+		t.Errorf("expected full metrics block appended, got:\n%s", out)
+	}
+}
+
+func TestRenderHOCON_MonitoringEnabled(t *testing.T) {
+	i := &intent.Intent{
+		Name:       "mon-test",
+		Network:    "mainnet",
+		Target:     intent.Target{Type: "local"},
+		Monitoring: &intent.Monitoring{Enabled: intent.BoolPtr(true)},
+	}
+	node := &intent.NodeSpec{Type: "fullnode"}
+	out, err := RenderHOCON("", i, node)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(out, "node.metrics") {
+		t.Error("missing node.metrics block")
+	}
+	if !strings.Contains(out, "enable = true") {
+		t.Error("metrics not enabled")
+	}
+}
+
+func TestRenderHOCON_MonitoringDisabled(t *testing.T) {
+	i := &intent.Intent{
+		Name:    "no-mon",
+		Network: "mainnet",
+		Target:  intent.Target{Type: "local"},
+	}
+	node := &intent.NodeSpec{Type: "fullnode"}
+	out, err := RenderHOCON("", i, node)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	// When monitoring is not enabled, metrics block should NOT be injected.
+	// Template may already contain node.metrics block with enable=false.
+	// When monitoring is disabled, we should NOT see enable=true.
+	lines := strings.Split(out, "\n")
+	inMetrics := false
+	inPrometheus := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "node.metrics") && strings.Contains(trimmed, "{") {
+			inMetrics = true
+			continue
+		}
+		if inMetrics && strings.HasPrefix(trimmed, "prometheus") && strings.Contains(trimmed, "{") {
+			inPrometheus = true
+			continue
+		}
+		if inPrometheus && strings.Contains(trimmed, "enable = true") {
+			t.Error("metrics enable=true should not be present when monitoring is disabled")
+		}
+		if inPrometheus && trimmed == "}" {
+			break
+		}
+	}
+}

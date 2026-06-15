@@ -44,6 +44,11 @@ func RenderHOCON(templateDir string, i *intent.Intent, node *intent.NodeSpec) (s
 	config = applyPortOverrides(config, node)
 	config = applyFeatureOverrides(config, node)
 
+	// Monitoring: auto-enable prometheus metrics in HOCON.
+	if i.Monitoring != nil && i.Monitoring.Enabled != nil && *i.Monitoring.Enabled {
+		config = ensureMetricsForMonitoring(config)
+	}
+
 	// 2. Trailing override block (network_overrides + witness_key + config_overrides).
 	if appendix := renderHOCONAppendix(node); appendix != "" {
 		if !strings.HasSuffix(config, "\n") {
@@ -474,5 +479,60 @@ func ensureJSONRPCEnabled(config string) string {
 			}
 		}
 	}
+	return config
+}
+
+// ensureMetricsForMonitoring sets node.metrics.prometheus.enable = true in
+// the HOCON config, synthesising the surrounding blocks when missing. This
+// is the active form used when monitoring.enabled=true — the user has
+// explicitly opted in to monitoring, so we *do* want to inject a prometheus
+// block into templates (nile/private) that lack one. Compare the simpler
+// SAFE NO-OP variant `ensureMetricsEnabled` used by features.metrics, which
+// only flips an existing flag and never synthesises blocks.
+//
+// Three cases:
+//  1. node.metrics { prometheus { enable = false } } → set to true
+//  2. node.metrics { prometheus { ... } } (no enable) → insert enable = true
+//  3. node.metrics block missing entirely → append a new block
+func ensureMetricsForMonitoring(config string) string {
+	lines := strings.Split(config, "\n")
+	inMetrics := false
+	inPrometheus := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "node.metrics") && strings.Contains(trimmed, "{") {
+			inMetrics = true
+			continue
+		}
+		if inMetrics {
+			if strings.HasPrefix(trimmed, "prometheus") && strings.Contains(trimmed, "{") {
+				inPrometheus = true
+				continue
+			}
+			if inPrometheus {
+				if strings.Contains(trimmed, "enable") {
+					indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+					lines[i] = fmt.Sprintf("%senable = true", indent)
+					return strings.Join(lines, "\n")
+				}
+				if trimmed == "}" {
+					indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+					lines[i] = indent + "enable = true\n" + line
+					return strings.Join(lines, "\n")
+				}
+			}
+			if trimmed == "}" && !inPrometheus {
+				// node.metrics block exists but no prometheus sub-block
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				lines[i] = indent + "prometheus {\n" + indent + "  enable = true\n" + indent + "}\n" + line
+				return strings.Join(lines, "\n")
+			}
+		}
+	}
+	// node.metrics block missing entirely — append to end
+	if !strings.HasSuffix(config, "\n") {
+		config += "\n"
+	}
+	config += "\nnode.metrics {\n  prometheus {\n    enable = true\n  }\n}\n"
 	return config
 }

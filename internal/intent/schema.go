@@ -2,10 +2,11 @@ package intent
 
 // Intent is the top-level declarative file describing desired node state.
 type Intent struct {
-	Name    string     `yaml:"name" json:"name" validate:"required,hostname_rfc1123"`
-	Target  Target     `yaml:"target" json:"target" validate:"required"`
-	Network string     `yaml:"network" json:"network" validate:"required,oneof=mainnet nile private"`
-	Nodes   []NodeSpec `yaml:"nodes" json:"nodes" validate:"required,min=1,dive"`
+	Name       string      `yaml:"name" json:"name" validate:"required,hostname_rfc1123"`
+	Target     Target      `yaml:"target" json:"target" validate:"required"`
+	Network    string      `yaml:"network" json:"network" validate:"required,oneof=mainnet nile private"`
+	Nodes      []NodeSpec  `yaml:"nodes" json:"nodes" validate:"required,min=1,dive"`
+	Monitoring *Monitoring `yaml:"monitoring,omitempty" json:"monitoring,omitempty"`
 }
 
 // Target specifies where to deploy.
@@ -392,6 +393,25 @@ type PortMapping struct {
 	JSONRPC      int `yaml:"jsonrpc,omitempty" json:"jsonrpc,omitempty"`
 	P2P          int `yaml:"p2p,omitempty" json:"p2p,omitempty"`
 	Metrics      int `yaml:"metrics,omitempty" json:"metrics,omitempty"`
+}
+
+// Monitoring configures the optional Prometheus + Grafana monitoring
+// stack that trond can deploy and manage alongside java-tron nodes.
+type Monitoring struct {
+	Enabled    *bool      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Prometheus PromConfig `yaml:"prometheus,omitempty" json:"prometheus,omitempty"`
+	Grafana    GrafConfig `yaml:"grafana,omitempty" json:"grafana,omitempty"`
+}
+
+// PromConfig configures the Prometheus scraper.
+type PromConfig struct {
+	Port      int    `yaml:"port,omitempty" json:"port,omitempty"`
+	Retention string `yaml:"retention,omitempty" json:"retention,omitempty"`
+}
+
+// GrafConfig configures the Grafana visualizer.
+type GrafConfig struct {
+	Port int `yaml:"port,omitempty" json:"port,omitempty"`
 }
 
 // BoolPtr is a helper for creating *bool values in intent construction.
