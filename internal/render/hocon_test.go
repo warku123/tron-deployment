@@ -247,20 +247,45 @@ func TestRenderHOCON_MetricsFeatureEnables(t *testing.T) {
 		}
 	})
 
-	t.Run("nile no prometheus block is a safe no-op", func(t *testing.T) {
+	// Since #167 the nile and private templates ship the same
+	// node.metrics.prometheus block as mainnet (enable = false by
+	// default), so features.metrics flips them on too — the feature is
+	// no longer a silent no-op on those networks.
+	for _, network := range []string{"nile", "private"} {
+		t.Run(network+" flips enable=true", func(t *testing.T) {
+			out, err := RenderHOCON("", &intent.Intent{
+				Name: "m", Network: network, Target: intent.Target{Type: "local"},
+			}, &intent.NodeSpec{
+				Type:     "fullnode",
+				Features: intent.Features{Metrics: &enabled},
+				Ports:    intent.PortMapping{Metrics: 59527},
+			})
+			if err != nil {
+				t.Fatalf("render %s: %v", network, err)
+			}
+			prom := prometheusBlock(t, out)
+			if !strings.Contains(prom, "enable = true") {
+				t.Errorf("%s prometheus.enable not flipped to true; block was:\n%s", network, prom)
+			}
+			if strings.Contains(prom, "enable = false") {
+				t.Errorf("%s prometheus.enable left false despite features.metrics=true; block:\n%s", network, prom)
+			}
+		})
+	}
+
+	t.Run("default off when metrics feature absent", func(t *testing.T) {
+		// Without features.metrics the template default must stand —
+		// prometheus block present (so monitoring/features can later flip
+		// it) but enable = false, so we never expose /metrics unasked.
 		out, err := RenderHOCON("", &intent.Intent{
 			Name: "m", Network: "nile", Target: intent.Target{Type: "local"},
-		}, &intent.NodeSpec{
-			Type:     "fullnode",
-			Features: intent.Features{Metrics: &enabled},
-		})
+		}, &intent.NodeSpec{Type: "fullnode"})
 		if err != nil {
 			t.Fatalf("render nile: %v", err)
 		}
-		// Nile template has no prometheus block; render must not have
-		// synthesised a stray `enable = true` line.
-		if strings.Contains(out, "prometheus") {
-			t.Error("nile render unexpectedly contains a prometheus block")
+		prom := prometheusBlock(t, out)
+		if !strings.Contains(prom, "enable = false") {
+			t.Errorf("nile prometheus.enable should default to false; block:\n%s", prom)
 		}
 	})
 }
