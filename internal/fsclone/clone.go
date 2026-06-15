@@ -89,7 +89,10 @@ func CloneDir(src, dst string) (method string, err error) {
 	if mkErr != nil {
 		return "", fmt.Errorf("fsclone: create staging dir in %s: %w", parent, mkErr)
 	}
-	defer os.RemoveAll(tmp) // removes the empty husk after rename, or the partial tree on error
+	// Removes the empty husk after a successful rename, or the partial
+	// tree on error. Best-effort temp cleanup — a failure here is
+	// non-actionable, so the error is deliberately discarded.
+	defer func() { _ = os.RemoveAll(tmp) }()
 	staged := filepath.Join(tmp, "payload")
 
 	method = cloneMethodName
