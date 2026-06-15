@@ -290,6 +290,43 @@ func TestRenderHOCON_MetricsFeatureEnables(t *testing.T) {
 	})
 }
 
+// TestRenderHOCON_MetricsAndMonitoringIdempotent pins that setting BOTH
+// features.metrics and monitoring.enabled yields a SINGLE
+// node.metrics.prometheus block with enable=true — never a duplicate.
+// RenderHOCON runs ensureMetricsEnabled (features path) and then
+// ensureMetricsForMonitoring (monitoring path) over the same config; now
+// that every template ships the block (#167) both just flip the existing
+// `enable` line, so they compose idempotently. This guards the
+// interaction across the planned merge of the two functions into one.
+func TestRenderHOCON_MetricsAndMonitoringIdempotent(t *testing.T) {
+	en := true
+	for _, network := range []string{"nile", "private", "mainnet"} {
+		t.Run(network, func(t *testing.T) {
+			out, err := RenderHOCON("", &intent.Intent{
+				Name: "m", Network: network, Target: intent.Target{Type: "local"},
+				Monitoring: &intent.Monitoring{Enabled: &en},
+			}, &intent.NodeSpec{
+				Type:     "fullnode",
+				Features: intent.Features{Metrics: &en},
+				Ports:    intent.PortMapping{Metrics: 59527},
+			})
+			if err != nil {
+				t.Fatalf("render %s: %v", network, err)
+			}
+			if n := strings.Count(out, "node.metrics"); n != 1 {
+				t.Errorf("%s: want exactly one node.metrics block, got %d", network, n)
+			}
+			if n := strings.Count(out, "prometheus {"); n != 1 {
+				t.Errorf("%s: want exactly one prometheus block, got %d", network, n)
+			}
+			prom := prometheusBlock(t, out)
+			if !strings.Contains(prom, "enable = true") {
+				t.Errorf("%s: prometheus.enable not true with both flags set; block:\n%s", network, prom)
+			}
+		})
+	}
+}
+
 func TestRenderHOCON_UnknownNetwork(t *testing.T) {
 	i := &intent.Intent{Network: "martian"}
 	node := &intent.NodeSpec{Type: "fullnode"}
