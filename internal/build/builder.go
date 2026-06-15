@@ -63,6 +63,15 @@ type Request struct {
 	// Only meaningful when ArtifactKind=image. Empty defaults to
 	// "gradle" for backward compatibility.
 	ImageStrategy string
+
+	// Patches is an ordered list of unified-diff files applied to a
+	// fresh `git worktree` of the resolved revision before gradle
+	// runs (FR-026). Empty list / nil = today's behavior (build runs
+	// in the source tree directly, PatchHash from working-tree diff).
+	// Non-empty triggers the worktree-isolated path: cache key is
+	// deterministic across machines, PatchHash = sha256 of patch
+	// contents in declared order.
+	Patches []string
 }
 
 // Result is the JSON-serializable success payload. Mirrors
@@ -95,6 +104,22 @@ type resolved struct {
 	imageDigest string
 	key         CacheKey
 	cacheKeyStr string
+	// buildSourceDir is the effective directory gradle runs in.
+	// Equal to src.Path for the no-patches path (today's behavior).
+	// Equal to the per-cache-key git worktree path when req.Patches
+	// is non-empty (FR-026). Runners reference this — NOT src.Path —
+	// so the patched code is what gradle sees. Manifests record
+	// src.Path (the user-canonical source), not the trond-internal
+	// worktree path.
+	buildSourceDir string
+	// patchRecords are the (basename, sha256) records computed
+	// ONCE in resolveBuild and stored in the eventual Manifest. The
+	// Patches []string in req carries the absolute filesystem paths;
+	// patchRecords carries the portable fingerprints. Manifests
+	// store records (not paths) so `trond build inspect` doesn't
+	// expose stale-path footguns when patches are moved/renamed
+	// or the cache is pulled from a shared TROND_STATE_DIR.
+	patchRecords []PatchRecord
 }
 
 // Run executes (or cache-hits) a build for the given request. The
@@ -172,6 +197,22 @@ func Run(ctx context.Context, req Request) (*Result, error) {
 			"notice: build.artifact=image (strategy=gradle) mounts /var/run/docker.sock into the builder; "+
 				"the source tree's build.gradle gains host docker access. "+
 				"Only run against trusted sources.")
+	}
+
+	// FR-026: when patches are declared, set up an isolated git
+	// worktree at the resolved revision + apply patches there. The
+	// runners use r.buildSourceDir, so this redirect is transparent
+	// to the downstream build code. Cleanup is deferred so partial
+	// builds don't leak worktrees.
+	if len(r.req.Patches) > 0 {
+		wt, cleanup, err := setupWorktree(ctx, r.src.Path,
+			r.src.ResolvedRevision, r.cacheKeyStr, r.req.Patches)
+		if err != nil {
+			_ = AppendAuditEvent(PhaseFailed, r.cacheKeyStr, "PATCH_FAILED", started)
+			return nil, err
+		}
+		defer cleanup()
+		r.buildSourceDir = wt
 	}
 
 	var manifest *Manifest
@@ -268,6 +309,39 @@ func resolveBuild(ctx context.Context, req Request) (*resolved, error) {
 			)
 	}
 
+	// FR-026/028: when build.patches is non-empty, override the
+	// dirty-tree-derived PatchHash with a deterministic
+	// sha256(ordered patch contents). This swaps machine-local
+	// `git diff` semantics for a pure function of inputs, so two
+	// operators with the same intent + same patch files produce
+	// the same cache key regardless of their working tree state.
+	var patchRecords []PatchRecord
+	if len(req.Patches) > 0 {
+		for _, p := range req.Patches {
+			if err := validatePatchFile(p); err != nil {
+				return nil, output.NewErrorf("INVALID_PATCH",
+					output.ExitValidationError, "%s", err.Error())
+			}
+		}
+		// One pass: produce records (basename + content sha256).
+		// PatchHash folds these into the cache-key string; the
+		// records themselves land in the Manifest for `trond
+		// build inspect` traceability without exposing the
+		// absolute filesystem paths (which would mislead on
+		// cross-machine cache reuse).
+		recs, err := buildPatchRecords(req.Patches)
+		if err != nil {
+			return nil, output.NewErrorf("INVALID_PATCH",
+				output.ExitValidationError, "compute patch records: %s", err.Error())
+		}
+		patchRecords = recs
+		// PatchHash gets folded into CacheKey below; DirtyState=true
+		// so the cache-key string emits the `+dirty-<patch8>` suffix
+		// just like the working-tree dirty path does.
+		src.PatchHash = computePatchHashFromRecords(recs)
+		src.DirtyState = true
+	}
+
 	// For host builds, BuilderImageDigest already captures the exact
 	// JVM in use (sha256 of `java -version` output). Including
 	// req.JDKVersion in the key on top of that would fragment the
@@ -292,12 +366,14 @@ func resolveBuild(ctx context.Context, req Request) (*resolved, error) {
 		ImageStrategy:      req.ImageStrategy,
 	}
 	return &resolved{
-		req:         req,
-		src:         src,
-		imageRef:    imageRef,
-		imageDigest: imageDigest,
-		key:         key,
-		cacheKeyStr: key.String(),
+		req:            req,
+		src:            src,
+		imageRef:       imageRef,
+		imageDigest:    imageDigest,
+		key:            key,
+		cacheKeyStr:    key.String(),
+		buildSourceDir: src.Path, // default; setupWorktree overrides when Patches set
+		patchRecords:   patchRecords,
 	}, nil
 }
 
@@ -363,6 +439,7 @@ func buildJAR(ctx context.Context, r *resolved, started time.Time) (*Manifest, e
 		SHA256:             sum,
 		GradleTask:         r.req.GradleTask,
 		GradleArgs:         r.req.GradleArgs,
+		Patches:            r.patchRecords,
 		Builder:            r.req.Builder,
 		Platform:           r.req.Platform,
 		DurationMs:         time.Since(started).Milliseconds(),

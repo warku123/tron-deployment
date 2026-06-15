@@ -164,6 +164,7 @@ func TestApply_BuildSummaryPopulated(t *testing.T) {
 	}
 	if summary == nil {
 		t.Fatal("BuildSummary nil")
+		return // unreachable after Fatal, but satisfies staticcheck SA5011
 	}
 	if summary.CacheKey == "" {
 		t.Error("CacheKey not populated")

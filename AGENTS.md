@@ -433,6 +433,39 @@ trond build prune --older-than 168h --keep-last 3 --confirm  # delete
 trond build prune --orphan --confirm                         # GC
 ```
 
+### Building with patches
+
+For systematic patching (test unmerged PRs, replay-style instrumentation,
+compliance variants), declare patches in the intent — trond opens a
+fresh `git worktree`, applies them there, builds, removes the worktree.
+Your primary source tree is never mutated.
+
+```yaml
+build:
+  source: ../java-tron
+  patches:
+    - ../tron-deployment/tools/replay/patches/01-skip-tx-expiration.patch
+    - ../tron-deployment/tools/replay/patches/02-skip-tapos-validation.patch
+```
+
+Paths are intent-relative. When `patches:` is non-empty:
+
+- `patch_hash` is a deterministic fold of per-patch SHA256s in declared
+  order — a pure function of patch CONTENTS (not paths). Same intent +
+  same patches → same `cache_key` on every machine (no longer dependent
+  on local working-tree state). This is the ONLY way to get cross-machine
+  cache reuse for non-vanilla builds.
+- The build manifest records `patches: [{name, sha256}, ...]` — basename
+  + content sha256, one entry per applied patch. `trond build inspect <key>`
+  surfaces these so an agent can verify a teammate's local patch files
+  match the cached artifact's inputs without depending on absolute paths.
+- Validation surfaces `INVALID_PATCH` (path missing / not a unified diff)
+  or `PATCH_FAILED` (apply rejected) as structured errors with
+  `exit_code: 2`. Agent should re-read the patch path or update
+  `build.revision` if the patch is against a different commit.
+- For iterative dev where you're editing source actively, leave
+  `patches:` empty and use the working-tree dirty path.
+
 ### Key invariants for agents
 
 - The build runs on the LOCAL machine even when `target.type: ssh` —

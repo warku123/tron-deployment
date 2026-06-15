@@ -1,0 +1,24 @@
+diff --git a/framework/src/main/java/org/tron/core/net/messagehandler/TransactionsMsgHandler.java b/framework/src/main/java/org/tron/core/net/messagehandler/TransactionsMsgHandler.java
+index e153e21f3..9d6544f6e 100644
+--- a/framework/src/main/java/org/tron/core/net/messagehandler/TransactionsMsgHandler.java
++++ b/framework/src/main/java/org/tron/core/net/messagehandler/TransactionsMsgHandler.java
+@@ -174,7 +174,8 @@ public class TransactionsMsgHandler implements TronMsgHandler {
+     }
+ 
+     try {
+-      trx.getTransactionCapsule().checkExpiration(chainBaseManager.getNextBlockSlotTime());
++      // trond/replay: skip network-layer expiration check.
++      // trx.getTransactionCapsule().checkExpiration(chainBaseManager.getNextBlockSlotTime());
+       tronNetDelegate.pushTransaction(trx.getTransactionCapsule());
+       advService.broadcast(trx);
+     } catch (P2pException e) {
+@@ -184,9 +185,6 @@ public class TransactionsMsgHandler implements TronMsgHandler {
+         peer.setBadPeer(true);
+         peer.disconnect(ReasonCode.BAD_TX);
+       }
+-    } catch (TransactionExpirationException e) {
+-      logger.warn("{}. trx: {}, peer: {}",
+-          e.getMessage(), trx.getMessageId(), peer.getInetAddress());
+     } catch (Exception e) {
+       logger.error("Trx {} from peer {} process failed", trx.getMessageId(), peer.getInetAddress(),
+           e);

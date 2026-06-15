@@ -469,6 +469,161 @@ func TestPrune_FreedBytesOnDryRunMatchesPlan(t *testing.T) {
 	}
 }
 
+// TestPrune_GCsOrphanWorktrees is the review-pass-8 H2 guard: a
+// worktree dir whose cache key has no live manifest AND no active
+// flock is an orphan (SIGKILL between setupWorktree and the
+// deferred cleanup; process panic; aborted ctrl-C between defer
+// registration and run). Prune MUST reclaim those — they're
+// 100-200 MB each for java-tron and never disappear on their own.
+func TestPrune_GCsOrphanWorktrees(t *testing.T) {
+	withTempBaseDir(t)
+	if err := EnsureCacheDirs(); err != nil {
+		t.Fatalf("EnsureCacheDirs: %v", err)
+	}
+
+	// Plant an orphan worktree dir with some content to measure
+	// FreedBytes against.
+	orphanKey := "orphan-key-no-manifest"
+	orphanPath := filepath.Join(CacheDir(), "worktrees", orphanKey)
+	if err := os.MkdirAll(orphanPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphanPath, "stale-data.bin"),
+		make([]byte, 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Also plant a non-orphan worktree (with a corresponding manifest)
+	// to confirm GC does NOT touch it.
+	live := seedJARManifest(t, "live-key", time.Now(), 100)
+	liveWorktreePath := filepath.Join(CacheDir(), "worktrees", live.CacheKey)
+	if err := os.MkdirAll(liveWorktreePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(liveWorktreePath, "in-use.bin"),
+		make([]byte, 2048), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Prune with a no-op policy (nothing to remove from manifests) —
+	// the GC pass still runs because it's unconditional.
+	res, err := Prune(context.Background(), PruneOptions{OrphanOnly: true})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	// Orphan must be gone.
+	if _, statErr := os.Stat(orphanPath); !os.IsNotExist(statErr) {
+		t.Errorf("orphan worktree at %s should be reclaimed; stat err = %v", orphanPath, statErr)
+	}
+	// Live worktree must be untouched (the live manifest's cache key
+	// is in the validKeys set, so its worktree skips the GC).
+	if _, statErr := os.Stat(liveWorktreePath); statErr != nil {
+		t.Errorf("live worktree at %s should NOT have been GC'd; stat err = %v", liveWorktreePath, statErr)
+	}
+
+	// Orphan worktrees land in result.OrphanWorktrees, NOT
+	// result.Removed (Entry is reserved for manifest-tied entries
+	// so the wire shape matches build-prune.schema.json's
+	// `artifact_kind: enum [jar, image]` constraint).
+	var foundOrphan bool
+	for _, w := range res.OrphanWorktrees {
+		if w.CacheKey == orphanKey {
+			foundOrphan = true
+			if w.SizeBytes < 4096 {
+				t.Errorf("OrphanWorktree.SizeBytes = %d; want >= 4096 (the planted file)", w.SizeBytes)
+			}
+		}
+	}
+	if !foundOrphan {
+		t.Errorf("orphan worktree not surfaced in result.OrphanWorktrees; got %d entries", len(res.OrphanWorktrees))
+	}
+
+	// FreedBytes should reflect the orphan's reclaimed bytes.
+	if res.FreedBytes < 4096 {
+		t.Errorf("FreedBytes = %d; want >= 4096 (orphan worktree reclaimed)", res.FreedBytes)
+	}
+}
+
+// TestPrune_DryRunSurfacesOrphanWorktrees pins M-1 from review pass 9:
+// dry-run reports an HONEST projection of what would be freed,
+// including orphan worktree dirs the GC pass would reclaim. Without
+// this, operators using --dry-run to size their cleanup get a
+// number smaller than the real --confirm run, surprising them.
+func TestPrune_DryRunSurfacesOrphanWorktrees(t *testing.T) {
+	withTempBaseDir(t)
+	if err := EnsureCacheDirs(); err != nil {
+		t.Fatal(err)
+	}
+	orphanKey := "dry-run-orphan"
+	orphanPath := filepath.Join(CacheDir(), "worktrees", orphanKey)
+	if err := os.MkdirAll(orphanPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphanPath, "stale.bin"),
+		make([]byte, 8192), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Prune(context.Background(), PruneOptions{All: true, DryRun: true})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	// Worktree must appear in the dry-run projection.
+	var listed bool
+	for _, w := range res.OrphanWorktrees {
+		if w.CacheKey == orphanKey {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Errorf("dry-run should list the orphan worktree; got %d entries", len(res.OrphanWorktrees))
+	}
+	if res.FreedBytes < 8192 {
+		t.Errorf("dry-run FreedBytes = %d; should include orphan's 8 KB", res.FreedBytes)
+	}
+	// But the dir MUST still be on disk after a dry-run.
+	if _, statErr := os.Stat(orphanPath); statErr != nil {
+		t.Errorf("dry-run removed the worktree; stat err = %v", statErr)
+	}
+}
+
+// TestPrune_SkipsLockedOrphanWorktree pins the safety case: an
+// orphan worktree dir whose cache key flock is currently held
+// (representing a concurrent in-flight build) is NOT GC'd. Without
+// this, a slow worktree setup followed by a prune-in-parallel could
+// rip out the worktree dir mid-gradle-run.
+func TestPrune_SkipsLockedOrphanWorktree(t *testing.T) {
+	withTempBaseDir(t)
+	if err := EnsureCacheDirs(); err != nil {
+		t.Fatalf("EnsureCacheDirs: %v", err)
+	}
+
+	lockedKey := "locked-by-concurrent-build"
+	wtPath := filepath.Join(CacheDir(), "worktrees", lockedKey)
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Hold the flock for this key, simulating an active setupWorktree.
+	release, err := AcquireCacheLock(CacheDir(), lockedKey)
+	if err != nil {
+		t.Fatalf("test AcquireCacheLock: %v", err)
+	}
+	t.Cleanup(release)
+
+	// No live manifest for this key → it LOOKS like an orphan to the
+	// GC scan, but the flock check protects it.
+	_, err = Prune(context.Background(), PruneOptions{OrphanOnly: true})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if _, statErr := os.Stat(wtPath); statErr != nil {
+		t.Errorf("locked worktree at %s should NOT be GC'd; stat err = %v", wtPath, statErr)
+	}
+}
+
 // --- helpers ---
 
 func keys(entries []*Entry) []string {

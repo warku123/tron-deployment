@@ -187,6 +187,7 @@ func buildImageFromJAR(ctx context.Context, r *resolved, jarPath, jarSHA256 stri
 		SHA256:             jarSHA256, // sha256 of the wrapped JAR, for traceability
 		GradleTask:         r.req.GradleTask,
 		GradleArgs:         r.req.GradleArgs,
+		Patches:            r.patchRecords,
 		Builder:            r.req.Builder,
 		Platform:           r.req.Platform,
 		DurationMs:         time.Since(started).Milliseconds(),

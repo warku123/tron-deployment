@@ -50,6 +50,18 @@
         "sha256":              { "type": "string" },
         "gradle_task":         { "type": "string" },
         "gradle_args":         { "type": "array", "items": { "type": "string" } },
+        "patches": {
+          "type": "array",
+          "description": "Patch records applied via git worktree before gradle ran (FR-026). Each record carries the patch filename's basename + the sha256 of its content; together they let an operator verify their local patches still match what produced the cached artifact, without depending on filesystem paths that may have moved. Omitted when build.patches was empty.",
+          "items": {
+            "type": "object",
+            "required": ["name", "sha256"],
+            "properties": {
+              "name":   { "type": "string", "description": "filepath.Base of the patch file as declared in intent.build.patches" },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "sha256 of the patch file contents" }
+            }
+          }
+        },
         "builder":             { "type": "string", "enum": ["docker","host"] },
         "platform":            { "type": "string" },
         "duration_ms":         { "type": "integer", "minimum": 0 },

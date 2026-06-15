@@ -218,6 +218,86 @@ the target arch without docker.sock trickery (the inner JAR is JVM
 bytecode, the outer step is COPY-only). Omit `platform:` to get
 host arch.
 
+## Patching source before build
+
+For workflows where you need to compile a *modified* java-tron — testing
+an unmerged upstream PR, backporting a fix to an older version, adding
+instrumentation for stress / replay testing, security or compliance
+variants — declare the patches in your intent and trond handles the rest:
+
+```yaml
+build:
+  source: ../java-tron
+  gradle_task: ":framework:buildFullNodeJar"
+  patches:
+    - ../tron-deployment/tools/replay/patches/01-skip-tx-expiration.patch
+    - ../tron-deployment/tools/replay/patches/02-skip-tapos-validation.patch
+    - ../tron-deployment/tools/replay/patches/03-skip-network-expiration.patch
+    - ../tron-deployment/tools/replay/patches/04-fast-proposals.patch
+```
+
+Paths are intent-relative (same rule as `build.source`). What trond does
+when `patches:` is non-empty:
+
+1. Validates each path: file exists, looks like a unified diff (catches the
+   common mistake of pointing at a YAML or a JAR by accident).
+2. For each patch, records `(basename, sha256(file-contents))`. Computes
+   `patch_hash` as a deterministic fold of those per-patch SHA256s in
+   declared order — a **pure function of patch contents**. Same intent +
+   same patches → same cache key on every machine. The per-patch records
+   land in the build manifest so `trond build inspect <key>` surfaces a
+   portable fingerprint (basename + content sha256) rather than absolute
+   filesystem paths that drift when patches move.
+3. Opens a fresh `git worktree` at `$TROND_STATE_DIR/builds/worktrees/<cache-key>/`,
+   checks out your `build.revision` (or HEAD) there, and `git apply`s the
+   patches in declared order.
+4. Runs gradle against the **worktree**, not your primary source. Your
+   own `git status` stays untouched — IDE windows don't churn, WIP edits
+   are safe.
+5. Removes the worktree after the build completes, success or failure.
+   Cache hits skip steps 3-5 entirely.
+
+Cache reuse across machines is now real: a teammate cloning this intent
+gets bit-identical artifacts from the cache. Compare against today's
+dirty-tree path, where every operator's local `.DS_Store` or IDE temp
+file shifted the cache key.
+
+### Authoring patches
+
+A patch is just a unified diff. Easiest way to produce one:
+
+```bash
+cd /path/to/java-tron
+# Make your changes; ./gradlew test as needed
+git diff > ~/my-feature.patch        # all changes
+git diff path/to/specific/File.java  # one file only
+```
+
+> ⚠️ **Don't** run `git checkout -- .` to "restore" the source tree
+> after capturing the diff — that DESTROYS the working changes. The
+> patch file alone is enough; trond will re-apply it from a clean
+> `git worktree` at build time and your primary checkout's state
+> is irrelevant. If you want to keep iterating on the changes
+> locally, leave them in place; if you want a clean tree, use
+> `git stash` (recoverable) instead of `git checkout` (destructive).
+
+Then reference `~/my-feature.patch` from `build.patches`. trond uses
+`git apply --check` before mutation, so a patch that doesn't apply
+cleanly fails fast with `PATCH_FAILED` pointing at the offending file
+and `git apply`'s stderr.
+
+### When NOT to use patches
+
+For iterative dev where you're actively editing the source and rebuilding
+every few seconds, **skip `patches:`**. Today's working-tree-dirty path
+still works: just edit the source, run `trond apply`, get the artifact
+with your edits. `PatchHash` falls back to `git diff` semantics and the
+build runs in your source dir (no worktree overhead).
+
+The declarative `patches:` field is for **systematic, reproducible**
+patching — when "this artifact needs these N patches" is part of the
+deploy's truth.
+
 ## Cache management
 
 ### List
@@ -241,6 +321,26 @@ trond build inspect 260585c9397b-bd0861e68 -o json
 
 Returns the full manifest plus size + orphan state. On an ambiguous
 prefix you get a `AMBIGUOUS_PREFIX` error listing the candidates.
+
+For entries built with `build.patches`, the JSON output includes a
+`patches` array of `{name, sha256}` records:
+
+```jsonc
+{
+  "cache_key": "...",
+  "patches": [
+    {"name": "01-skip-tx-expiration.patch",
+     "sha256": "a1b2c3...8 chars... ...64 hex total"},
+    {"name": "02-skip-tapos-validation.patch",
+     "sha256": "..."}
+  ],
+  ...
+}
+```
+
+To verify your local patches still match this cached artifact (e.g.
+on a teammate's machine), compare the on-disk sha256 of each local
+patch file against the manifest's records — same content = same key.
 
 ### Prune
 

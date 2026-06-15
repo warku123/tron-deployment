@@ -123,7 +123,7 @@ func (realDockerRunner) RunBuild(ctx context.Context, r *resolved, outDir, outTm
 		// /src must be RW because gradle writes build/, .gradle/ into
 		// the project tree (same as running ./gradlew on the host).
 		// The user already gives gradle this access locally.
-		"-v", r.src.Path + ":/src:rw",
+		"-v", r.buildSourceDir + ":/src:rw",
 		"-v", gradleVolume + ":/root/.gradle",
 		"--workdir", "/src",
 	}

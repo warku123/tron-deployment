@@ -42,9 +42,13 @@ type adapter struct {
 
 // RunBuild satisfies the internal buildRunner interface by
 // translating the new method shape down to the exported TestRunner's
-// signature. Passes outDir through so image-kind test stubs can
-// write their image-id snapshot files where image.go expects them.
+// signature. Passes the effective build source dir (r.buildSourceDir,
+// which is the worktree when build.patches was set, else the user's
+// source path) so test stubs see what the real runners see — tests
+// that exercise the patches path can assert on the worktree path.
+// outDir flows through so image-kind test stubs can write their
+// image-id snapshot files where image.go expects them.
 func (a *adapter) RunBuild(ctx context.Context, r *resolved, outDir, outTmp string) error {
-	return a.stub.RunDockerBuild(ctx, r.req.SourcePath, outDir, outTmp,
+	return a.stub.RunDockerBuild(ctx, r.buildSourceDir, outDir, outTmp,
 		r.req.GradleTask, r.req.GradleArgs, r.req.Env)
 }

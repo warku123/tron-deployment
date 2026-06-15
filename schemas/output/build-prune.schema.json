@@ -24,9 +24,23 @@
       "type": "array",
       "description": "Entries that were actually removed. Omitted when dry_run=true.",
       "items": { "$ref": "#/$defs/entry" }
+    },
+    "orphan_worktrees": {
+      "type": "array",
+      "description": "Git-worktree dirs under <cacheDir>/worktrees/ whose cache key has no live manifest. Discovered AND reported on dry_run; ALSO reclaimed when dry_run=false. Distinct from `removed` because they have no manifest to project the Entry shape from. Produced by SIGKILL between setupWorktree and the deferred cleanup, process panics, etc.",
+      "items": { "$ref": "#/$defs/orphan_worktree" }
     }
   },
   "$defs": {
+    "orphan_worktree": {
+      "type": "object",
+      "description": "A git-worktree directory reclaimed (or, on dry-run, projected for reclaim) by Prune's GC pass. Distinct from manifest-tied Entries — these have no source_revision, artifact_kind, etc., because the manifest was never persisted or has already been pruned.",
+      "required": ["cache_key", "size_bytes"],
+      "properties": {
+        "cache_key":  { "type": "string", "description": "Directory name under <cacheDir>/worktrees/ — usually a former build's cache key string" },
+        "size_bytes": { "type": "integer", "minimum": 0, "description": "Total bytes reclaimed by removing this worktree (sum of file sizes under the directory)." }
+      }
+    },
     "entry": {
       "type": "object",
       "description": "Same shape as `trond build list` entries — manifest fields plus size_bytes/orphaned.",
@@ -53,6 +67,17 @@
         "sha256":              { "type": "string" },
         "gradle_task":         { "type": "string" },
         "gradle_args":         { "type": "array", "items": { "type": "string" } },
+        "patches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "sha256"],
+            "properties": {
+              "name":   { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        },
         "builder":             { "type": "string" },
         "platform":            { "type": "string" },
         "duration_ms":         { "type": "integer" },

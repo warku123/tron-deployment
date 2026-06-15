@@ -66,6 +66,31 @@ func TestJarReqForWrap(t *testing.T) {
 		}
 	})
 
+	t.Run("patches flow through to inner JAR build", func(t *testing.T) {
+		// Review-pass-8 H1 guard: when an image-strategy=jar-wrap
+		// build declares patches, those patches MUST land in the
+		// inner JAR request so the wrapped image carries patched
+		// bytecode. A bug that cleared Patches alongside ImageTag /
+		// ImageStrategy would silently produce a wrapped image
+		// with UN-patched code — the worst kind of regression,
+		// because the build succeeds and the image runs.
+		outer := Request{
+			SourcePath:    "/some/src",
+			ArtifactKind:  "image",
+			ImageStrategy: "jar-wrap",
+			ImageTag:      "tag:dev",
+			Patches: []string{
+				"/abs/p1.patch", "/abs/p2.patch",
+			},
+		}
+		got := jarReqForWrap(outer)
+		if len(got.Patches) != 2 ||
+			got.Patches[0] != "/abs/p1.patch" ||
+			got.Patches[1] != "/abs/p2.patch" {
+			t.Errorf("Patches must propagate to inner JAR build unchanged; got %v", got.Patches)
+		}
+	})
+
 	t.Run("equivalent to explicit jar request", func(t *testing.T) {
 		// The crux of the cache-reuse invariant: building source S
 		// twice — once with --artifact jar, once with --artifact

@@ -30,7 +30,55 @@ The codebase is split by module: `main.go` / `state.go` / `trongrid.go` / `priva
 
 ## Required java-tron patches
 
-Mainnet transactions carry `ref_block_hash` / `expiration` / `timestamp` fields baked against mainnet time and block numbers. None of these are valid on a private chain. To let `broadcast` succeed, your private chain node must skip 4 checks. 
+Mainnet transactions carry `ref_block_hash` / `expiration` / `timestamp` fields baked against mainnet time and block numbers. None of these are valid on a private chain. To let `broadcast` succeed, your private chain node must skip 4 checks.
+
+The patches ship as ready-to-apply unified diffs under
+`tools/replay/patches/`. Two ways to use them:
+
+### Recommended: declare via `trond build.patches`
+
+Put the patches in your intent and let `trond apply` handle build
+isolation, deterministic cache keys, and rebuilds:
+
+```yaml
+nodes:
+  - type: fullnode
+    install_path: /tmp/trond-dev/replay-target
+    build:
+      source: ../java-tron
+      gradle_task: ":framework:buildFullNodeJar"
+      patches:
+        - ../tron-deployment/tools/replay/patches/01-skip-tx-expiration.patch
+        - ../tron-deployment/tools/replay/patches/02-skip-tapos-validation.patch
+        - ../tron-deployment/tools/replay/patches/03-skip-network-expiration.patch
+        - ../tron-deployment/tools/replay/patches/04-fast-proposals.patch
+```
+
+Then:
+
+```bash
+trond apply --intent replay-target.yaml -o json
+```
+
+trond opens a fresh `git worktree` of your `java-tron` checkout,
+applies the 4 patches there, runs gradle, and stages the JAR — your
+primary source tree is never touched. Same intent on a teammate's
+laptop produces the same `cache_key` and (after the first build) hits
+the same cache slot.
+
+### Manual: apply with `git apply` then build
+
+If you prefer not to involve trond's build pipeline:
+
+```bash
+cd /path/to/java-tron
+git apply /path/to/tron-deployment/tools/replay/patches/*.patch
+./gradlew :framework:buildFullNodeJar
+```
+
+The 4 patches are documented inline below for review purposes (the
+files in `patches/` are the source of truth — these snippets may drift).
+
 
 ### Patch 1 — `TransactionCapsule.checkExpiration`
 

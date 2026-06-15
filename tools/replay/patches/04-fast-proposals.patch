@@ -1,0 +1,17 @@
+diff --git a/chainbase/src/main/java/org/tron/core/capsule/ProposalCapsule.java b/chainbase/src/main/java/org/tron/core/capsule/ProposalCapsule.java
+index f665705b7..a1b7214e1 100644
+--- a/chainbase/src/main/java/org/tron/core/capsule/ProposalCapsule.java
++++ b/chainbase/src/main/java/org/tron/core/capsule/ProposalCapsule.java
+@@ -136,7 +136,11 @@ public class ProposalCapsule implements ProtoCapsule<Proposal> {
+   }
+ 
+   public boolean hasExpired(long time) {
+-    return this.proposal.getExpirationTime() <= time;
++    // trond/replay: private-chain test mode — process every pending
++    // proposal at the next maintenance window regardless of the
++    // mainnet 3-day expiration. Optional patch; only needed for
++    // faster proposal iteration in a private network.
++    return true;
+   }
+ 
+   public byte[] createDbKey() {
