@@ -46,7 +46,7 @@ func RenderHOCON(templateDir string, i *intent.Intent, node *intent.NodeSpec) (s
 
 	// Monitoring: auto-enable prometheus metrics in HOCON.
 	if i.Monitoring != nil && i.Monitoring.Enabled != nil && *i.Monitoring.Enabled {
-		config = ensureMetricsEnabled(config)
+		config = ensureMetricsForMonitoring(config)
 	}
 
 	// 2. Trailing override block (network_overrides + witness_key + config_overrides).
@@ -482,12 +482,19 @@ func ensureJSONRPCEnabled(config string) string {
 	return config
 }
 
-// ensureMetricsEnabled sets node.metrics.prometheus.enable = true in the HOCON
-// config. It handles three cases:
+// ensureMetricsForMonitoring sets node.metrics.prometheus.enable = true in
+// the HOCON config, synthesising the surrounding blocks when missing. This
+// is the active form used when monitoring.enabled=true — the user has
+// explicitly opted in to monitoring, so we *do* want to inject a prometheus
+// block into templates (nile/private) that lack one. Compare the simpler
+// SAFE NO-OP variant `ensureMetricsEnabled` used by features.metrics, which
+// only flips an existing flag and never synthesises blocks.
+//
+// Three cases:
 //  1. node.metrics { prometheus { enable = false } } → set to true
 //  2. node.metrics { prometheus { ... } } (no enable) → insert enable = true
 //  3. node.metrics block missing entirely → append a new block
-func ensureMetricsEnabled(config string) string {
+func ensureMetricsForMonitoring(config string) string {
 	lines := strings.Split(config, "\n")
 	inMetrics := false
 	inPrometheus := false

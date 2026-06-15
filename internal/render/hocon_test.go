@@ -286,44 +286,44 @@ func TestReplaceHOCONValue(t *testing.T) {
 	}
 }
 
-func TestEnsureMetricsEnabled_ExistingEnableFalse(t *testing.T) {
+func TestEnsureMetricsForMonitoring_ExistingEnableFalse(t *testing.T) {
 	in := `node.metrics {
   prometheus {
     enable = false
     port = 9527
   }
 }`
-	out := ensureMetricsEnabled(in)
+	out := ensureMetricsForMonitoring(in)
 	if !strings.Contains(out, "enable = true") {
 		t.Errorf("expected enable = true, got:\n%s", out)
 	}
 }
 
-func TestEnsureMetricsEnabled_NoEnableField(t *testing.T) {
+func TestEnsureMetricsForMonitoring_NoEnableField(t *testing.T) {
 	in := `node.metrics {
   prometheus {
     port = 9527
   }
 }`
-	out := ensureMetricsEnabled(in)
+	out := ensureMetricsForMonitoring(in)
 	if !strings.Contains(out, "enable = true") {
 		t.Errorf("expected enable = true inserted, got:\n%s", out)
 	}
 }
 
-func TestEnsureMetricsEnabled_NoPrometheusBlock(t *testing.T) {
+func TestEnsureMetricsForMonitoring_NoPrometheusBlock(t *testing.T) {
 	in := `node.metrics {
   something = else
 }`
-	out := ensureMetricsEnabled(in)
+	out := ensureMetricsForMonitoring(in)
 	if !strings.Contains(out, "prometheus {") || !strings.Contains(out, "enable = true") {
 		t.Errorf("expected prometheus block inserted, got:\n%s", out)
 	}
 }
 
-func TestEnsureMetricsEnabled_MissingMetricsBlock(t *testing.T) {
+func TestEnsureMetricsForMonitoring_MissingMetricsBlock(t *testing.T) {
 	in := `some.config = value`
-	out := ensureMetricsEnabled(in)
+	out := ensureMetricsForMonitoring(in)
 	if !strings.Contains(out, "node.metrics {") || !strings.Contains(out, "prometheus {") {
 		t.Errorf("expected full metrics block appended, got:\n%s", out)
 	}
