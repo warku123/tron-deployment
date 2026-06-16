@@ -49,6 +49,14 @@
       "type": "boolean",
       "description": "True if block_height >= the network's perceived head. Derived from the same probe; absent if the probe failed."
     },
+    "network": {
+      "type": "string",
+      "description": "The network this node was deployed on (mainnet | nile | private). Empty for nodes deployed before this field was recorded."
+    },
+    "is_private": {
+      "type": "boolean",
+      "description": "True when network is 'private' — a self-contained chain safe for an unattended agent to mutate. Lets an automated caller PROVE a rig is private before acting. False when network is empty/unknown (fail-safe)."
+    },
     "lag": {
       "type": "integer",
       "description": "Block delta between local height and the highest height the node has seen across peers; only present from live probe."

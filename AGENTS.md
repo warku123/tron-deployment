@@ -555,6 +555,30 @@ topic; don't paraphrase from training data.
 
 ---
 
+## Safety — proving a rig is private (for unattended agents)
+
+An automated caller that should only ever touch a throwaway private chain
+(never mainnet/nile) can both **prove** and **enforce** that:
+
+- **Query the fact.** `status <node> -o json` and `apply -o json` return
+  `network` (`mainnet | nile | private`) and `is_private` (bool).
+  `is_private` is `true` only when `network == "private"`; it is `false`
+  for an empty/unknown network — fail-safe, so "I'm not sure" reads as
+  "not safe to mutate". Gate destructive actions on `is_private == true`.
+
+- **Enforce at apply.** `apply --require-private` refuses any non-private
+  intent up front (error_code `PRIVATE_NETWORK_REQUIRED`, exit 2) before
+  touching the target. Pure opt-in — default `apply` and mainnet deploys
+  are unchanged. Pass it from a sandboxed skill so the deploy is
+  *mechanically* incapable of hitting shared infra, instead of trusting a
+  standing rule.
+
+The read-only verbs (`status`, `wait`, `inspect`, `list`, `diagnose`)
+never mutate; only `apply` / `remove` / `start|stop|restart` do — gate
+the mutating ones behind the `is_private` check.
+
+---
+
 ## Anti-patterns — things to NEVER do
 
 1. **Don't silently retry HUMAN_REQUIRED with `--auto-approve`**. Exit

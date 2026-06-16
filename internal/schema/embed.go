@@ -58,7 +58,11 @@ import (
 //	        Manifest. Additive — old clients ignoring unknown
 //	        fields are unaffected. Drives FR-026 (declarative
 //	        source patches via build.patches).
-const SchemaVersion = "1.7.0"
+//	1.8.0 — apply + status (+ list/inspect) output gain `network` and
+//	        `is_private` (the C1 private-net safety fact); new
+//	        `apply` / `network create --require-private` gate. Additive
+//	        optional fields.
+const SchemaVersion = "1.8.0"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

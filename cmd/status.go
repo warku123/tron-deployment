@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tronprotocol/tron-deployment/internal/apply"
+	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/runtime"
@@ -74,6 +75,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		"last_applied": node.LastApplied,
 		"intent_hash":  node.IntentHash,
 		"config_hash":  node.ConfigHash,
+		// Network + is_private let an automated caller PROVE a rig is a
+		// private net before acting (the C1 safety fact). network is
+		// empty for nodes deployed before it was recorded; is_private is
+		// then false (fail-safe — an agent treats "unknown" as not-safe).
+		"network":    node.Network,
+		"is_private": intent.IsPrivate(node.Network),
 		"api_endpoints": map[string]any{
 			"http": fmt.Sprintf("http://127.0.0.1:%d", effectivePort(node.HTTPPort, 8090)),
 			"grpc": fmt.Sprintf("127.0.0.1:%d", effectivePort(node.GRPCPort, 50051)),

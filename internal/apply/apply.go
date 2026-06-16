@@ -97,12 +97,17 @@ type Options struct {
 // shape (matches schemas/output/apply.schema.json) so MCP / recipe /
 // CLI presentations are interchangeable.
 type Result struct {
-	Name       string            `json:"name"`
-	Outcome    string            `json:"outcome"` // created | updated | no_change
-	IntentHash string            `json:"intent_hash"`
-	ConfigHash string            `json:"config_hash"`
-	Version    string            `json:"version"`
-	Runtime    string            `json:"runtime"`
+	Name       string `json:"name"`
+	Outcome    string `json:"outcome"` // created | updated | no_change
+	IntentHash string `json:"intent_hash"`
+	ConfigHash string `json:"config_hash"`
+	Version    string `json:"version"`
+	Runtime    string `json:"runtime"`
+	// Network + IsPrivate echo the deployed network and whether it is a
+	// private (agent-safe-to-mutate) net, so a caller sees the same
+	// safety fact `status --json` exposes without a second call.
+	Network    string            `json:"network"`
+	IsPrivate  bool              `json:"is_private"`
 	Endpoints  map[string]string `json:"endpoints"`
 	DurationMs int64             `json:"duration_ms"`
 
@@ -290,6 +295,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		IntentHash: opts.IntentHash,
 		ConfigHash: configHash,
 		Version:    node.Version,
+		Network:    opts.Intent.Network,
 		Target: state.NodeTarget{
 			Type:         opts.Intent.Target.Type,
 			Host:         opts.Intent.Target.Host,
@@ -327,6 +333,8 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		ConfigHash: configHash,
 		Version:    node.Version,
 		Runtime:    runtimeType,
+		Network:    opts.Intent.Network,
+		IsPrivate:  intent.IsPrivate(opts.Intent.Network),
 		Endpoints: map[string]string{
 			"http": fmt.Sprintf("http://127.0.0.1:%d", node.Ports.HTTP),
 			"grpc": fmt.Sprintf("127.0.0.1:%d", node.Ports.GRPC),
@@ -451,6 +459,8 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 		ConfigHash: opts.Existing.ConfigHash,
 		Version:    opts.Existing.Version,
 		Runtime:    opts.Existing.Runtime,
+		Network:    opts.Intent.Network,
+		IsPrivate:  intent.IsPrivate(opts.Intent.Network),
 		Endpoints: map[string]string{
 			"http": fmt.Sprintf("http://127.0.0.1:%d", ports.HTTP),
 			"grpc": fmt.Sprintf("127.0.0.1:%d", ports.GRPC),

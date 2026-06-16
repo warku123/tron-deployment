@@ -16,11 +16,12 @@ import (
 )
 
 var (
-	applyIntentPath  string
-	applyAutoApprove bool
-	applyWait        bool
-	applyWaitTimeout time.Duration
-	applyMonitor     bool
+	applyIntentPath     string
+	applyAutoApprove    bool
+	applyWait           bool
+	applyWaitTimeout    time.Duration
+	applyMonitor        bool
+	applyRequirePrivate bool
 )
 
 var applyCmd = &cobra.Command{
@@ -46,6 +47,7 @@ func init() {
 	applyCmd.Flags().BoolVar(&applyWait, "wait", false, "Block until the deployed node's HTTP API is reachable")
 	applyCmd.Flags().DurationVar(&applyWaitTimeout, "wait-timeout", 5*time.Minute, "Total wait budget when --wait is set")
 	applyCmd.Flags().BoolVar(&applyMonitor, "monitor", false, "Deploy monitoring stack (Prometheus + Grafana) alongside the node")
+	applyCmd.Flags().BoolVar(&applyRequirePrivate, "require-private", false, "Refuse to apply unless the intent's network is private (machine-enforced safety gate for unattended agents)")
 	mustMarkRequired(applyCmd, "intent")
 	mustMarkRequired(applyCmd, "intent")
 	rootCmd.AddCommand(applyCmd)
@@ -59,6 +61,17 @@ func runApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, err.Error(),
 			"Check intent file syntax", "Run: trond config validate "+applyIntentPath)
+	}
+
+	// --require-private: a machine-enforced safety gate for unattended
+	// agents. When set, refuse any non-private intent BEFORE touching the
+	// target, so an automated caller can prove it can only mutate a
+	// private rig (never mainnet/nile). Pure opt-in: default apply
+	// behaviour and mainnet deploys are unchanged.
+	if applyRequirePrivate && !intent.IsPrivate(parsed.Network) {
+		return exitWithError("PRIVATE_NETWORK_REQUIRED", output.ExitValidationError,
+			fmt.Sprintf("--require-private set but intent network is %q (not private); refusing to apply", parsed.Network),
+			"Set network: private in the intent, or drop --require-private to allow mainnet/nile")
 	}
 
 	// Monitoring is opt-in: only deploy when --monitor is explicitly passed.
