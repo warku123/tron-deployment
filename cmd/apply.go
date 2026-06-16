@@ -63,11 +63,14 @@ func runApply(cmd *cobra.Command, args []string) error {
 			"Check intent file syntax", "Run: trond config validate "+applyIntentPath)
 	}
 
-	// --require-private: a machine-enforced safety gate for unattended
-	// agents. When set, refuse any non-private intent BEFORE touching the
-	// target, so an automated caller can prove it can only mutate a
-	// private rig (never mainnet/nile). Pure opt-in: default apply
-	// behaviour and mainnet deploys are unchanged.
+	// --require-private (early gate, precedence). The authoritative
+	// enforcement lives in apply.Apply() core so EVERY path inherits it,
+	// but we ALSO check here, first — before target resolution and the
+	// HUMAN_REQUIRED change-detection gate — so a non-private intent
+	// refuses with PRIVATE_NETWORK_REQUIRED (exit 2) rather than being
+	// masked by HUMAN_REQUIRED (exit 10). Both checks delegate to the one
+	// intent.IsPrivate predicate; this is layered defense, not divergent
+	// logic.
 	if applyRequirePrivate && !intent.IsPrivate(parsed.Network) {
 		return exitWithError("PRIVATE_NETWORK_REQUIRED", output.ExitValidationError,
 			fmt.Sprintf("--require-private set but intent network is %q (not private); refusing to apply", parsed.Network),
@@ -142,6 +145,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		IntentPath:     applyIntentPath, // FR-021: relative build.source resolves vs this
 		Wait:           applyWait,
 		WaitTimeout:    applyWaitTimeout,
+		RequirePrivate: applyRequirePrivate,
 	})
 	if err != nil {
 		return wrapApplyError(err)
@@ -154,27 +158,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// the in-Go name; we surface it as "result" on the wire because
 	// that's what the public contract uses.
 	durationMs := time.Since(start).Milliseconds()
-	resultMap := map[string]any{
-		"name":        res.Name,
-		"result":      res.Outcome,
-		"intent_hash": res.IntentHash,
-		"runtime":     res.Runtime,
-		"version":     res.Version,
-		"endpoints":   res.Endpoints,
-		"duration_ms": durationMs,
-	}
-	if res.ConfigHash != "" {
-		resultMap["config_hash"] = res.ConfigHash
-	}
-	if res.Build != nil {
-		resultMap["build"] = res.Build
-	}
-	if res.MonitoringError != "" {
-		resultMap["monitoring_error"] = res.MonitoringError
-	}
-	if len(res.MonitoringEndpoints) > 0 {
-		resultMap["monitoring"] = res.MonitoringEndpoints
-	}
+	resultMap := applyResultMap(res, durationMs)
 
 	writeAudit(auditEvent{
 		Command:    "apply",
@@ -250,6 +234,40 @@ func findTemplatesDir() string {
 // exitWithError returns a StructuredError for propagation through cobra RunE.
 func exitWithError(code string, exitCode int, msg string, suggestions ...string) error {
 	return output.NewError(code, exitCode, msg).WithSuggestions(suggestions...)
+}
+
+// applyResultMap translates an apply.Result into the JSON map the CLI
+// emits for `apply -o json`. Extracted from runApply so the wire shape
+// is unit-testable WITHOUT a live deploy — the original inline map
+// silently dropped network/is_private (the struct had them, the map
+// didn't), and a struct-level test couldn't catch it. Field names match
+// schemas/output/apply.schema.json. Wait fields (ready/waited_ms) are
+// layered on by runApply since they depend on the --wait flag.
+func applyResultMap(res *apply.Result, durationMs int64) map[string]any {
+	m := map[string]any{
+		"name":        res.Name,
+		"result":      res.Outcome,
+		"intent_hash": res.IntentHash,
+		"runtime":     res.Runtime,
+		"version":     res.Version,
+		"network":     res.Network,
+		"is_private":  res.IsPrivate,
+		"endpoints":   res.Endpoints,
+		"duration_ms": durationMs,
+	}
+	if res.ConfigHash != "" {
+		m["config_hash"] = res.ConfigHash
+	}
+	if res.Build != nil {
+		m["build"] = res.Build
+	}
+	if res.MonitoringError != "" {
+		m["monitoring_error"] = res.MonitoringError
+	}
+	if len(res.MonitoringEndpoints) > 0 {
+		m["monitoring"] = res.MonitoringEndpoints
+	}
+	return m
 }
 
 // writeResult emits result as JSON on stdout. The output format is

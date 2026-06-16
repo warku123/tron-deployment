@@ -2,12 +2,46 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
 	"github.com/tronprotocol/tron-deployment/internal/intent"
+	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 )
+
+// TestApply_RequirePrivate_RefusesInCore pins the C1 guard at the CORE
+// (apply.Apply), not just cmd — so network create + MCP inherit it. A
+// non-private intent with RequirePrivate must refuse with
+// PRIVATE_NETWORK_REQUIRED / exit 2 before any deploy.
+func TestApply_RequirePrivate_RefusesInCore(t *testing.T) {
+	dir := t.TempDir()
+	paths.SetBaseDir(dir)
+	t.Cleanup(func() { paths.SetBaseDir("") })
+
+	in := &intent.Intent{
+		Name:    "m",
+		Network: "mainnet",
+		Target:  intent.Target{Type: "local", Runtime: "jar"},
+		Nodes:   []intent.NodeSpec{{Type: "fullnode", Version: "4.8.1"}},
+	}
+	store, st := freshStore(t)
+	_, err := Apply(context.Background(), Options{
+		Intent: in, Target: &fakeTarget{}, Store: store, State: st,
+		IntentHash: "h", RequirePrivate: true,
+	})
+	if err == nil {
+		t.Fatal("expected PRIVATE_NETWORK_REQUIRED refusal, got nil")
+	}
+	var se *output.StructuredError
+	if !errors.As(err, &se) || se.Code != "PRIVATE_NETWORK_REQUIRED" {
+		t.Errorf("want PRIVATE_NETWORK_REQUIRED, got %v", err)
+	}
+	if len(st.Nodes) != 0 {
+		t.Error("refused apply must not have persisted a node")
+	}
+}
 
 // TestApply_PrivateNetwork_ResultAndState is the C1 happy path: applying
 // a private-network intent records network="private" in state and reports

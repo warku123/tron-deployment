@@ -20,8 +20,9 @@ import (
 )
 
 var (
-	createIntentPath string
-	createMonitor    bool
+	createIntentPath     string
+	createMonitor        bool
+	createRequirePrivate bool
 )
 
 var createCmd = &cobra.Command{
@@ -34,6 +35,7 @@ var createCmd = &cobra.Command{
 func init() {
 	createCmd.Flags().StringVar(&createIntentPath, "intent", "", "Path to intent.yaml (required)")
 	createCmd.Flags().BoolVar(&createMonitor, "monitor", false, "Deploy Prometheus + Grafana monitoring stack for the network")
+	createCmd.Flags().BoolVar(&createRequirePrivate, "require-private", false, "Refuse to create the network unless its intent network is private (machine-enforced safety gate for unattended agents)")
 	if err := createCmd.MarkFlagRequired("intent"); err != nil {
 		panic(err)
 	}
@@ -45,6 +47,14 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	parsed, err := intent.Load(createIntentPath)
 	if err != nil {
 		return output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
+	}
+
+	// --require-private: same machine-enforced safety gate as `apply`,
+	// applied to the multi-node path. Refuse a non-private network before
+	// deploying anything.
+	if createRequirePrivate && !intent.IsPrivate(parsed.Network) {
+		return output.NewError("PRIVATE_NETWORK_REQUIRED", output.ExitValidationError,
+			fmt.Sprintf("--require-private set but intent network is %q (not private); refusing to create", parsed.Network))
 	}
 
 	// Apply monitoring defaults early so RenderHOCON can inject metrics config.
@@ -156,6 +166,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		mn := state.ManagedNode{
 			Name:    nodeName,
 			Version: node.Version,
+			Network: parsed.Network,
 			Target: state.NodeTarget{
 				Type:         parsed.Target.Type,
 				Host:         parsed.Target.Host,

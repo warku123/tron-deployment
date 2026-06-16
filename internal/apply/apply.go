@@ -91,6 +91,13 @@ type Options struct {
 	// Result.WaitError / Result.Ready.
 	Wait        bool
 	WaitTimeout time.Duration
+
+	// RequirePrivate is the machine-enforced safety gate: when true,
+	// Apply refuses any non-private intent before doing anything. Lives
+	// in the core (not just cmd) so EVERY caller — CLI apply, network
+	// create, MCP — inherits the guarantee and it can't be bypassed by
+	// choosing a different entry point. Pure opt-in; callers set it.
+	RequirePrivate bool
 }
 
 // Result is the structured output of one Apply call. Stable JSON
@@ -181,6 +188,16 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 	if err := validateOptions(opts); err != nil {
 		return nil, err
 	}
+
+	// Safety gate (opt-in): refuse a non-private intent before any side
+	// effect. Enforced here in the core so it covers every entry point,
+	// not just `trond apply`. Returns a typed StructuredError so callers
+	// surface error_code PRIVATE_NETWORK_REQUIRED / exit 2 unchanged.
+	if opts.RequirePrivate && !intent.IsPrivate(opts.Intent.Network) {
+		return nil, output.NewError("PRIVATE_NETWORK_REQUIRED", output.ExitValidationError,
+			fmt.Sprintf("--require-private set but intent network is %q (not private); refusing to apply", opts.Intent.Network))
+	}
+
 	start := time.Now()
 	node := &opts.Intent.Nodes[0]
 
@@ -451,6 +468,18 @@ func validateOptions(o Options) error {
 // before invoking — the helper itself trusts the contract to keep
 // the body straight-line.
 func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *Result {
+	// Backfill the network on legacy state. A node deployed before
+	// ManagedNode.Network existed has it empty; on a no-op re-apply we
+	// learn it from the intent, so persist it — otherwise the no_change
+	// Result would report network/is_private from the intent while a
+	// follow-up `status` (which reads state) still showed it absent.
+	// Best-effort: a save failure here doesn't fail the no-op.
+	if opts.Existing != nil && opts.Existing.Network != opts.Intent.Network && opts.Store != nil && opts.State != nil {
+		opts.Existing.Network = opts.Intent.Network
+		opts.Store.UpsertNode(opts.State, *opts.Existing)
+		_ = opts.Store.Save(opts.State)
+	}
+
 	ports := opts.Intent.Nodes[0].Ports
 	return &Result{
 		Name:       opts.Intent.Name,

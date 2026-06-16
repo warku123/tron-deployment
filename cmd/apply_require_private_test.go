@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tronprotocol/tron-deployment/internal/output"
+	"github.com/tronprotocol/tron-deployment/internal/paths"
 )
 
 // TestRunApply_RequirePrivate_RefusesNonPrivate is the C1 guard test:
@@ -18,6 +19,10 @@ import (
 // (so no docker daemon is needed — the guard returns at intent-load
 // time). A private intent must NOT trip the guard.
 func TestRunApply_RequirePrivate_RefusesNonPrivate(t *testing.T) {
+	// Isolate state so we never read/write the real ~/.trond.
+	paths.SetBaseDir(t.TempDir())
+	t.Cleanup(func() { paths.SetBaseDir("") })
+
 	// Global flag state is package-level; save + restore.
 	oldPath, oldReq := applyIntentPath, applyRequirePrivate
 	t.Cleanup(func() { applyIntentPath, applyRequirePrivate = oldPath, oldReq })

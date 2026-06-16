@@ -22,3 +22,19 @@ up cold.
   available where it matters.
 - **Depends on / blocked by:** `internal/fsclone` primitive landing (this PR);
   a concrete second consumer (e.g. an agent warm-pool flow or `apply --snapshot`).
+
+## Rename `network-create`'s `network` output field
+
+- **What:** `network create -o json` returns `network` = the network's intent
+  NAME, while `apply`/`status`/`list`/`inspect` return `network` = the chain
+  kind (`mainnet|nile|private`, matching the intent's `network:` field). Rename
+  network-create's field (e.g. → `name` / `network_name`) so `network` means
+  one thing across the CLI.
+- **Why:** an agent that learned `network` from one command misreads it in
+  another. C1 widened the collision by adding `network`=chain-kind to
+  apply/status.
+- **Cons:** breaking change to network-create.schema.json — needs a major
+  schema bump + agent migration, so it can't ride along in a feature PR.
+- **Context:** flagged by the 2026-06 eng-review of the C1 private-net PR
+  (Issue 4 / Codex #7). Documented in AGENTS.md's safety section meanwhile.
+- **Depends on:** a deliberate schema-version major bump.

@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tronprotocol/tron-deployment/internal/apply"
+	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/state"
 	"github.com/tronprotocol/tron-deployment/internal/target"
@@ -70,6 +71,8 @@ func listNodes(ctx context.Context, _ *mcp.CallToolRequest, _ emptyArgs) (*mcp.C
 			"version":      n.Version,
 			"last_applied": n.LastApplied,
 			"target_type":  n.Target.Type,
+			"network":      n.Network,
+			"is_private":   intent.IsPrivate(n.Network),
 		}
 		if len(n.Labels) > 0 {
 			row["labels"] = n.Labels
@@ -102,6 +105,8 @@ func statusForNode(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*
 		"intent_hash":  node.IntentHash,
 		"config_hash":  node.ConfigHash,
 		"labels":       node.Labels,
+		"network":      node.Network,
+		"is_private":   intent.IsPrivate(node.Network),
 	}
 	// Live probe — best effort, only when state says the node is
 	// running. We resolve a target via the node's stored target spec
@@ -148,9 +153,11 @@ func inspectAllNodes(ctx context.Context, _ *mcp.CallToolRequest, _ emptyArgs) (
 	rows := make([]map[string]any, 0, len(st.Nodes))
 	for _, n := range st.Nodes {
 		row := map[string]any{
-			"name":    n.Name,
-			"status":  n.Status,
-			"runtime": n.Runtime,
+			"name":       n.Name,
+			"status":     n.Status,
+			"runtime":    n.Runtime,
+			"network":    n.Network,
+			"is_private": intent.IsPrivate(n.Network),
 		}
 		// Endpoints: we have HTTPPort/GRPCPort persisted in state from
 		// apply; cmd/inspect.go's enrichment with container_ip
