@@ -12,7 +12,7 @@ const (
 	falconSKLen  = 1281 // liboqs Falcon-512 secret key bytes
 	falconPKLen  = 897  // liboqs Falcon-512 public key bytes (with 0x09 header)
 	falconHLen   = 896  // on-chain public key: h polynomial (header stripped)
-	falconSigLen = 666  // Falcon-padded-512 constant signature length
+	falconSigLen = 690  // liboqs Falcon-512 max signature buffer
 
 	falconSKHexLen = falconSKLen * 2 // 2562 hex chars
 	falconHHexLen  = falconHLen * 2  // 1792 hex chars

@@ -6,8 +6,7 @@ package main
 //
 // Wire-format compatibility with java-tron's BouncyCastle verifier:
 //
-//   - Algorithm: "Falcon-padded-512" — produces constant 666-byte signatures,
-//     always within TRON's [617, 667] acceptance window.
+//   - Algorithm: "Falcon-512" — produces compressed variable-length signatures.
 //
 //   - Header byte: 0x39 (= 0x30 + logn, logn=9 for Falcon-512). Matches the
 //     compressed-format marker that BouncyCastle's FalconSigner emits and that
@@ -39,7 +38,7 @@ import (
 	"unsafe"
 )
 
-const falconAlg = "Falcon-padded-512" // constant 666-byte sigs, header 0x39
+const falconAlg = "Falcon-512" // compressed variable-length sigs, header 0x39
 
 // FalconSigner signs transaction IDs with Falcon-512 (FN_DSA_512) using liboqs.
 // Create via NewFalconSigner (load existing keypair) or GenerateFalconKeypair
@@ -95,7 +94,7 @@ func (s *FalconSigner) Close() {
 	}
 }
 
-// Sign produces a 666-byte Falcon-padded-512 signature over the 32-byte txID
+// Sign produces a compressed Falcon-512 signature over the 32-byte txID
 // (hex-encoded). The message signed is the raw txID bytes — the same digest
 // ECDSA and ML-DSA-44 sign — matching java-tron's verifier path.
 func (s *FalconSigner) Sign(txIDHex string) ([]byte, error) {
@@ -190,7 +189,7 @@ func newOQSSig() (*C.OQS_SIG, error) {
 	defer C.free(unsafe.Pointer(alg))
 	sig := C.OQS_SIG_new(alg)
 	if sig == nil {
-		return nil, errors.New("liboqs: Falcon-padded-512 not available (is liboqs built with OQS_ENABLE_SIG_falcon_padded_512?)")
+		return nil, errors.New("liboqs: Falcon-512 not available (is liboqs built with OQS_ENABLE_SIG_falcon_512?)")
 	}
 	return sig, nil
 }
