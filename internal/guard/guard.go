@@ -70,6 +70,40 @@ func Enforce(network string) error {
 	return EnforceArg(false, network)
 }
 
+// NodeRef is a (name, network) pair for the multi-node guard.
+type NodeRef struct {
+	Name    string
+	Network string
+}
+
+// EnforceNodes is the multi-node analog of Enforce for verbs that touch
+// more than one node (chaos disconnect/partition, network destroy/upgrade).
+// When the gate is on it refuses if ANY node is non-private, naming the
+// first offender so the operator knows which node broke the guarantee. The
+// caller must pass every node the operation will mutate, gathered from
+// state, so the refusal happens before any partial mutation.
+func EnforceNodes(refs []NodeRef) error {
+	if !Requested() {
+		return nil
+	}
+	for _, r := range refs {
+		if intent.IsPrivate(r.Network) {
+			continue
+		}
+		net := r.Network
+		if net == "" {
+			net = "<unrecorded>"
+		}
+		return output.NewError("PRIVATE_NETWORK_REQUIRED", output.ExitValidationError,
+			fmt.Sprintf("--require-private is set but node %q is on network %q (not private); refusing the operation", r.Name, net)).
+			WithSuggestions(
+				"Every node the operation touches must be private",
+				"Target a private network, or drop --require-private / "+EnvVar,
+			)
+	}
+	return nil
+}
+
 // EnforceArg is Enforce plus an explicit per-call request, OR-ed with the
 // flag/env floor. Callers that carry their own opt-in signal (e.g. the MCP
 // apply tool's require_private argument, where there is no cobra flag) pass

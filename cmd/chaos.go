@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/state"
 )
@@ -113,6 +114,14 @@ func chaosPair(ctx context.Context, op, a, b string) error {
 	if nodeB == nil {
 		return output.NewError("NODE_NOT_FOUND", output.ExitGeneralError, "node "+b+" not found in state")
 	}
+	// --require-private: both endpoints must be private before we touch the
+	// rig's network. Uses the already-loaded nodes (no extra state read).
+	if err := guard.EnforceNodes([]guard.NodeRef{
+		{Name: nodeA.Name, Network: nodeA.Network},
+		{Name: nodeB.Name, Network: nodeB.Network},
+	}); err != nil {
+		return err
+	}
 	// Chaos works through "docker network ..." on the local host. Both jar
 	// runtime and SSH targets fall outside that — the harness should reach
 	// for tc / iptables on those.
@@ -205,6 +214,18 @@ func chaosGroups(ctx context.Context, op, spec string) error {
 	if len(groups) < 2 {
 		return output.NewError("VALIDATION_ERROR", output.ExitValidationError,
 			"--groups must contain at least two groups separated by '|'")
+	}
+
+	// --require-private: enforce across EVERY node in the spec up front, so
+	// a non-private member refuses with one clean error before any pair is
+	// touched (chaosGroups accumulates per-pair errors and continues, so a
+	// per-pair guard alone would partially apply / spam errors).
+	var allNodes []string
+	for _, g := range groups {
+		allNodes = append(allNodes, g...)
+	}
+	if err := requirePrivateForNodes(allNodes...); err != nil {
+		return err
 	}
 
 	var pairs [][2]string

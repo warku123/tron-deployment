@@ -74,6 +74,34 @@ func requirePrivateForNode(name string) error {
 	return guard.Enforce(node.Network)
 }
 
+// requirePrivateForNodes is the multi-node analog of requirePrivateForNode
+// (chaos partition/heal touch many nodes at once). It loads state ONCE,
+// resolves each named node's recorded network, and enforces the gate across
+// all of them up front — so a non-private node in the set refuses BEFORE any
+// partial mutation. Missing nodes are skipped here; the command's own
+// resolution emits the canonical NODE_NOT_FOUND. Fast path: no state read
+// when the gate is off.
+func requirePrivateForNodes(names ...string) error {
+	if !guard.Requested() {
+		return nil
+	}
+	store, err := state.NewStore(statePath())
+	if err != nil {
+		return err
+	}
+	deployState, err := store.Load()
+	if err != nil {
+		return err
+	}
+	refs := make([]guard.NodeRef, 0, len(names))
+	for _, name := range names {
+		if n := store.GetNode(deployState, name); n != nil {
+			refs = append(refs, guard.NodeRef{Name: n.Name, Network: n.Network})
+		}
+	}
+	return guard.EnforceNodes(refs)
+}
+
 // resolveNodeContext loads a node from state and constructs its target and runtime.
 func resolveNodeContext(name string) (*nodeContext, error) {
 	store, err := state.NewStore(statePath())
