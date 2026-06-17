@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.9.0",
+  "schema_version": "1.10.0",
   "entries": [
     {
       "name": "apply",
@@ -96,6 +96,10 @@
     {
       "name": "shadow-fork-mutate",
       "hash": "b5cd74b38258f5d314080aced974ee16baa29641f08c205c36756a378ee922fa"
+    },
+    {
+      "name": "snapshot-clone",
+      "hash": "e5f7355f7bd14f6e38c432b381fbcbbfb06d15d4398f72d6d24444c0a6048d4c"
     },
     {
       "name": "snapshot-download",

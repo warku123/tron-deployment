@@ -88,6 +88,7 @@ var DefaultSchemaLookup = map[string]string{
 	"trond snapshot sources":   "snapshot-sources",
 	"trond snapshot list":      "snapshot-list",
 	"trond snapshot download":  "snapshot-download",
+	"trond snapshot clone":     "snapshot-clone",
 	"trond snapshot jobs":      "snapshot-jobs",
 	"trond recipe list":        "recipe-list",
 	"trond recipe show":        "recipe-show",

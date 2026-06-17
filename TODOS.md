@@ -3,25 +3,26 @@
 Deferred work captured during reviews. Each item carries enough context to pick
 up cold.
 
-## Public `trond snapshot clone` verb
+## `trond snapshot clone --from-node <name>` (resolve a node's DB dir)
 
-- **What:** Expose the `internal/fsclone` copy-on-write clone primitive as a
-  user-facing `trond snapshot clone <src> <dst>` CLI verb.
-- **Why:** Lets agents / operators build a warm pool of fixtures interactively —
-  clone a cached, pinned snapshot to a fresh isolated dir in seconds instead of
-  re-downloading or re-copying 30–90 GB.
-- **Pros:** Completes the warm-pool story as a first-class capability; useful for
-  the "a new agent just uses trond" workflow.
-- **Cons:** Speculative public API with only one consumer today (the equivalence
-  test). Adds CLI surface, docs, and a test matrix for a capability nobody is
-  asking for interactively yet.
-- **Context:** Deferred during the 2026-06-13 `/plan-eng-review` (Issue 1). The
-  reusable primitive lives in `internal/fsclone` (`x/sys/unix` clonefile/FICLONE
-  with byte-copy fallback). The outside-voice (Codex) Net agreed: don't broaden
-  to a public verb until a second real consumer exists AND CI proves CoW is
-  available where it matters.
-- **Depends on / blocked by:** `internal/fsclone` primitive landing (this PR);
-  a concrete second consumer (e.g. an agent warm-pool flow or `apply --snapshot`).
+- **What:** Add a `--from-node <name>` source to `snapshot clone` that resolves a
+  managed node's chain-DB directory from state, for BOTH docker and jar runtimes,
+  and refuses to clone unless the node is stopped.
+- **Why:** Lets an agent fork a live rig's DB by node name instead of hand-typing
+  the on-disk path.
+- **Cons / why it was deferred from B3:** the existing `destFromNode`
+  (`cmd/snapshot/download.go`) is jar-only (rejects docker) and returns
+  `install_path`, NOT the chain-DB dir — so it can't be reused as-is. Docker
+  storage paths live in render logic, not `state.json`, so this needs a new
+  runtime-aware DB-path resolver. And `fsclone.CloneDir`'s contract requires a
+  *quiescent* source, so `--from-node` must hard-refuse a running node (or stop
+  it) to avoid a corrupt point-in-time clone.
+- **Context:** Deferred during the 2026-06-17 `/plan-eng-review` of B3 (the
+  outside-voice/Codex caught that the originally-planned `--from-node` was
+  jar-only + unsafe-on-running). B3 shipped positional-paths-only
+  (`clone <src> <dst>`); this is the by-node convenience layer on top.
+- **Depends on / blocked by:** B3 (`snapshot clone`) landing first; a
+  runtime-aware DB-path resolver (docker storage path is not in state today).
 
 ## Emit `chain_id` in `status` / `inspect` -o json
 
