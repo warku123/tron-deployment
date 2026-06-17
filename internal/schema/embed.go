@@ -80,7 +80,12 @@ import (
 //	        are collected into the `trond schema` manifest, so the manifest
 //	        surface changes for every command (additive). The C1 safety
 //	        boundary now covers all single-node mutations.
-const SchemaVersion = "1.11.0"
+//	1.12.0 — status + inspect output gain `build_cache_key` and a clean
+//	        `build_revision` (short git SHA); list output documents
+//	        `build_cache_key`. Lets an agent learn which java-tron commit a
+//	        node runs without assuming (ai-ops B1: echo the resolved SHA).
+//	        Additive optional fields, source-built nodes only.
+const SchemaVersion = "1.12.0"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

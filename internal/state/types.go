@@ -1,6 +1,9 @@
 package state
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ManagedNode represents a deployed node tracked in the state file.
 type ManagedNode struct {
@@ -47,6 +50,27 @@ type ManagedNode struct {
 
 	// Monitoring tracks the deployed monitoring stack for this node.
 	Monitoring *MonitoringState `json:"monitoring,omitempty"`
+}
+
+// BuildRevision returns the resolved source git revision (short, 12-hex)
+// recorded in the build cache key, or "" when the node wasn't built from
+// source (consumed a pre-built image/jar). The cache key is constructed as
+// "<gitRevision[:12]>-b<digest>[+dirty-...][-x...]" (internal/build/key.go),
+// so the revision is the leading hex segment before the first '-'. Lets an
+// agent learn which java-tron commit a node is running without parsing the
+// compound cache key itself.
+func (n ManagedNode) BuildRevision() string {
+	if n.BuildCacheKey == "" {
+		return ""
+	}
+	rev := n.BuildCacheKey
+	if i := strings.IndexByte(rev, '-'); i >= 0 {
+		rev = rev[:i]
+	}
+	if len(rev) != 12 || strings.TrimLeft(rev, "0123456789abcdef") != "" {
+		return ""
+	}
+	return rev
 }
 
 // MonitoringState records the Prometheus + Grafana stack deployed

@@ -168,6 +168,11 @@ trond status my-fullnode -o json
   the container, not stdout). `runtime=jar`: `journalctl -u <unit>`.
 - `api_endpoints.http` is the private-net RPC — point read-only on-chain
   readers (e.g. `tron-toolkit`) at it for the verify half of a loop.
+- `build_revision` (+ `build_cache_key`) — for a node built from source
+  (intent `build:` block), the resolved java-tron git revision (short
+  12-hex) it's running, so an agent never has to assume which commit is
+  deployed. Present in `status` / `inspect -o json`; `list` carries the
+  raw `build_cache_key`. Absent for pre-built image/jar nodes.
 - `chain_id` is NOT yet emitted (TRON's chain id is genesis-derived, not
   a single cheap RPC field) — tracked in TODOS.md.
 

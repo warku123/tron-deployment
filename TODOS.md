@@ -24,6 +24,28 @@ up cold.
 - **Depends on / blocked by:** B3 (`snapshot clone`) landing first; a
   runtime-aware DB-path resolver (docker storage path is not in state today).
 
+## Reconcile `scripts/db_cp.sh` with `trond snapshot clone`
+
+- **What:** There are now TWO "fast local chain-DB copy" mechanisms: the
+  Go `trond snapshot clone` verb (copy-on-write via APFS clonefile / Linux
+  FICLONE, byte-copy fallback) added in #192, and `scripts/db_cp.sh`
+  (rsync for metadata + hard-link for `.sst`) added in #194 (bladehan1).
+  Pick one story and converge.
+- **Why:** two overlapping capabilities drift and confuse — an agent/operator
+  shouldn't have to guess which to use for a warm-pool fixture.
+- **Options:** (a) teach `snapshot clone` a hard-link tier (between CoW and
+  full byte copy) so `.sst` files share inodes when CoW is unavailable, then
+  retire `db_cp.sh`; or (b) have `db_cp.sh` shell out to `trond snapshot
+  clone`; or (c) explicitly document them as distinct (CoW clone vs
+  hard-link backup) if the use cases really differ.
+- **Context:** flagged 2026-06-17 after #194 merged. `internal/fsclone`
+  owns the CoW primitive; `db_cp.sh` is a standalone shell script referenced
+  in `knowledge/snapshots.md`. Hard-links and CoW have different semantics
+  (hard-link shares the inode → a later in-place write to one copy corrupts
+  the other; CoW is independent), so reconciling needs care, not a blind
+  merge.
+- **Depends on / blocked by:** nothing; both already merged.
+
 ## Emit `chain_id` in `status` / `inspect` -o json
 
 - **What:** The ai-ops A1 ask lists `chain_id` in the per-node `status

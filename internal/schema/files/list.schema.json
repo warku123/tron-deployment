@@ -15,7 +15,8 @@
       "network":      { "type": "string" },
       "last_applied": { "type": "string", "format": "date-time" },
       "labels":       { "type": "object", "additionalProperties": { "type": "string" } },
-      "target_type":  { "type": "string", "enum": ["local", "ssh"] }
+      "target_type":  { "type": "string", "enum": ["local", "ssh"] },
+      "build_cache_key": { "type": "string", "description": "Content-addressed build cache key (source-built nodes only); its 12-hex prefix is the source git revision. status/inspect -o json also surface a clean build_revision." }
     }
   }
 }

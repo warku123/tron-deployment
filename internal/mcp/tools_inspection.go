@@ -20,6 +20,19 @@ import (
 
 type emptyArgs struct{}
 
+// addBuildIdentity adds build_cache_key + the resolved build_revision (B1)
+// to a row when the node was built from source. No-op for pre-built
+// image/jar nodes. Shared by list/status/inspect so the shape is identical.
+func addBuildIdentity(row map[string]any, n *state.ManagedNode) {
+	if n.BuildCacheKey == "" {
+		return
+	}
+	row["build_cache_key"] = n.BuildCacheKey
+	if rev := n.BuildRevision(); rev != "" {
+		row["build_revision"] = rev
+	}
+}
+
 type nodeArg struct {
 	Name string `json:"name" jsonschema:"name of the managed node (must match intent.name)"`
 }
@@ -74,6 +87,7 @@ func listNodes(ctx context.Context, _ *mcp.CallToolRequest, _ emptyArgs) (*mcp.C
 			"network":      n.Network,
 			"is_private":   intent.IsPrivate(n.Network),
 		}
+		addBuildIdentity(row, &n)
 		if len(n.Labels) > 0 {
 			row["labels"] = n.Labels
 		}
@@ -113,6 +127,7 @@ func statusForNode(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*
 		"healthy": false,
 		"logs":    apply.LogsDescriptor(node),
 	}
+	addBuildIdentity(out, node)
 	// Live probe + container_id — best effort, resolving the target at most
 	// once. We must not open an SSH connection just to read container_id
 	// from a stopped remote node (mcpResolveTargetFromNode.Connect() isn't
@@ -181,6 +196,7 @@ func inspectAllNodes(ctx context.Context, _ *mcp.CallToolRequest, _ emptyArgs) (
 			// the `status` tool, which already resolves a target.
 			"logs": apply.LogsDescriptor(&n),
 		}
+		addBuildIdentity(row, &n)
 		// Endpoints: we have HTTPPort/GRPCPort persisted in state from
 		// apply; cmd/inspect.go's enrichment with container_ip
 		// requires a live docker query, skipped for the static MCP
