@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	tronpb "github.com/tronprotocol/tron-deployment/internal/dbfork/proto/pb"
+	"google.golang.org/protobuf/proto"
 )
 
 // NodeClient wraps the subset of java-tron's HTTP API needed by txgen:
@@ -190,6 +194,71 @@ func parseUnsigned(respBytes []byte) (*UnsignedTx, error) {
 	}
 	u.Raw = append([]byte{}, respBytes...)
 	return &u, nil
+}
+
+// ExtendExpiration rewrites raw_data.expiration before signing, then refreshes
+// raw_data_hex and txID so signatures cover the updated transaction body.
+func (u *UnsignedTx) ExtendExpiration(expirationMillis int64) error {
+	if expirationMillis <= 0 {
+		return nil
+	}
+	rawBytes, err := hex.DecodeString(u.RawDataHex)
+	if err != nil {
+		return fmt.Errorf("decode raw_data_hex: %w", err)
+	}
+	var raw tronpb.TransactionRaw
+	if err := proto.Unmarshal(rawBytes, &raw); err != nil {
+		return fmt.Errorf("decode raw_data proto: %w", err)
+	}
+	if raw.Timestamp <= 0 {
+		return errors.New("raw_data timestamp is missing")
+	}
+	raw.Expiration = raw.Timestamp + expirationMillis
+	updatedRaw, err := proto.Marshal(&raw)
+	if err != nil {
+		return fmt.Errorf("encode raw_data proto: %w", err)
+	}
+	sum := sha256.Sum256(updatedRaw)
+	rawHex := hex.EncodeToString(updatedRaw)
+	txID := hex.EncodeToString(sum[:])
+
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(u.Raw, &obj); err != nil {
+		return fmt.Errorf("decode unsigned tx json: %w", err)
+	}
+	rawHexJSON, err := json.Marshal(rawHex)
+	if err != nil {
+		return err
+	}
+	txIDJSON, err := json.Marshal(txID)
+	if err != nil {
+		return err
+	}
+	var rawObj map[string]json.RawMessage
+	if err := json.Unmarshal(obj["raw_data"], &rawObj); err != nil {
+		return fmt.Errorf("decode raw_data json: %w", err)
+	}
+	expirationJSON, err := json.Marshal(raw.Expiration)
+	if err != nil {
+		return err
+	}
+	rawObj["expiration"] = expirationJSON
+	rawObjJSON, err := json.Marshal(rawObj)
+	if err != nil {
+		return fmt.Errorf("encode raw_data json: %w", err)
+	}
+	obj["raw_data"] = rawObjJSON
+	obj["raw_data_hex"] = rawHexJSON
+	obj["txID"] = txIDJSON
+	updatedTx, err := json.Marshal(obj)
+	if err != nil {
+		return fmt.Errorf("encode unsigned tx json: %w", err)
+	}
+
+	u.RawDataHex = rawHex
+	u.TxID = txID
+	u.Raw = updatedTx
+	return nil
 }
 
 func (c *NodeClient) post(ctx context.Context, path string, body any) ([]byte, error) {

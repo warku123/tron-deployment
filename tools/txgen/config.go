@@ -23,6 +23,7 @@ type Config struct {
 		Concurrency          int    `json:"concurrency"`
 		PrivateKey           string `json:"privateKey"`
 		OutputDir            string `json:"outputDir"`
+		ExpirationMillis     int64  `json:"expirationMillis"`
 		TxType               struct {
 			Transfer      int `json:"transfer"`
 			TransferTRC10 int `json:"transferTrc10"`
@@ -58,6 +59,7 @@ type Config struct {
 	Broadcast struct {
 		InputDir   string `json:"inputDir"`
 		TpsLimit   int    `json:"tpsLimit"`
+		Workers    int    `json:"workers"`    // concurrent HTTP workers; 0 = auto (tpsLimit/50, min 4, max 256)
 		SaveTxID   bool   `json:"saveTxId"`
 		TxIDFile   string `json:"txIdFile"`
 		ReportFile string `json:"reportFile"`
@@ -105,6 +107,9 @@ func (c *Config) applyDefaults() {
 	if c.Generate.TransferAmount == 0 {
 		c.Generate.TransferAmount = 1
 	}
+	if c.Generate.ExpirationMillis == 0 {
+		c.Generate.ExpirationMillis = 86_400_000 // 1 day
+	}
 	if c.Generate.TRC20FeeLimit == 0 {
 		c.Generate.TRC20FeeLimit = 100_000_000 // 100 TRX
 	}
@@ -123,6 +128,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Broadcast.TpsLimit == 0 {
 		c.Broadcast.TpsLimit = 1000
+	}
+	if c.Broadcast.Workers == 0 {
+		c.Broadcast.Workers = c.Broadcast.TpsLimit / 50
+		if c.Broadcast.Workers < 4 {
+			c.Broadcast.Workers = 4
+		}
+		if c.Broadcast.Workers > 256 {
+			c.Broadcast.Workers = 256
+		}
 	}
 	if c.Broadcast.TxIDFile == "" {
 		c.Broadcast.TxIDFile = "broadcast-txid.csv"
@@ -191,6 +205,9 @@ func (c *Config) validate() error {
 	}
 	if c.Generate.ReceiverAddressCount <= 0 {
 		return errors.New("generate.receiverAddressCount must be > 0")
+	}
+	if c.Generate.ExpirationMillis < 0 {
+		return errors.New("generate.expirationMillis must be >= 0")
 	}
 	return nil
 }

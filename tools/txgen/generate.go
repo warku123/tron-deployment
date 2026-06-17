@@ -33,10 +33,8 @@ import (
 // inspectable in a text editor.
 //
 // Note on expiration: the node assigns expiration = head_block_time +
-// 60s by default for HTTP-built transactions. txgen does NOT extend
-// that, so generated txs must be broadcast quickly (within a minute on
-// mainnet pacing, longer on a slow private chain). If you need long
-// shelf-life txs, raise `block.maxTimeUntilExpiration` in node config.
+// 60s by default for HTTP-built transactions. txgen rewrites raw_data
+// before signing so generated transactions use cfg.Generate.ExpirationMillis.
 func runGenerate(ctx context.Context, cfg *Config) error {
 	if err := os.MkdirAll(cfg.Generate.OutputDir, 0o755); err != nil {
 		return err
@@ -309,6 +307,10 @@ func generateBatch(
 			unsigned, buildErr = node.CreateTRC20Transfer(ctx, sgn.senderHex, c20, receiver, cfg.Generate.TransferAmount, cfg.Generate.TRC20FeeLimit)
 		}
 		if buildErr != nil {
+			fail++
+			continue
+		}
+		if err := unsigned.ExtendExpiration(cfg.Generate.ExpirationMillis); err != nil {
 			fail++
 			continue
 		}

@@ -42,7 +42,8 @@ Save this as `txgen.json` next to the binary:
     "privateKey": "<64-hex-char sender key>",
     "outputDir": "txgen-output",
     "txType": { "transfer": 100, "transferTrc10": 0, "transferTrc20": 0 },
-    "transferAmount": 1
+    "transferAmount": 1,
+    "expirationMillis": 86400000
   },
 
   "broadcast": {
@@ -63,7 +64,10 @@ txgen generate -c txgen.json
 
 `generate` first builds `receiverAddressCount` fresh secp256k1 receivers (dumped to `txgen-output/receivers.csv` for auditability or `db fork` pre-funding), then builds `totalTxCount` signed TRX transfers fanning out across those receivers and splits them into `txgen-output/generate-tx-NNNN.csv`. Workers issue one HTTP round-trip per tx to the node (`/wallet/createtransaction`) for the unsigned form, then sign locally with secp256k1.
 
-**Time-sensitive:** the node stamps each tx with `expiration = head_block_time + 60s` by default. Broadcast within a minute, or raise `block.maxTimeUntilExpiration` in the node's `config.conf` first.
+By default txgen rewrites each unsigned transaction before signing so
+`raw_data.expiration = raw_data.timestamp + 86400000` (1 day). Override this
+with `generate.expirationMillis` when you need a shorter or longer broadcast
+window.
 
 ### 3. Broadcast to the private chain
 
@@ -187,7 +191,8 @@ transactions that should be PQ-signed (the rest are ECDSA-signed):
 
 Common helpers:
 - `Toolkit.jar db fork` with `<outputDir>/receivers.csv` to pre-fund receivers in one shot.
-- Raise `block.maxTimeUntilExpiration` in node config if your generate→broadcast gap is longer than 60s.
+- `generate.expirationMillis` defaults to 1 day, so generated CSVs can be
+  broadcast after the node's default 60 second transaction window.
 
 ---
 
@@ -263,6 +268,7 @@ txgen reads a single JSON file (default `./txgen.json`, override with `-c` / `--
     "trc10Id": "1000001",
     "trc20Address": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
     "transferAmount": 1,
+    "expirationMillis": 86400000,
     "trc20FeeLimit": 100000000
   },
 
@@ -298,6 +304,7 @@ txgen reads a single JSON file (default `./txgen.json`, override with `-c` / `--
 | `generate` | `trc10Id` | — | TRC10 token id (numeric string). Required iff `transferTrc10 > 0`. |
 | `generate` | `trc20Address` | — | TRC20 contract address (base58 or hex). Required iff `transferTrc20 > 0`. |
 | `generate` | `transferAmount` | `1` | Amount per tx in the smallest unit (SUN for TRX, raw token units otherwise). |
+| `generate` | `expirationMillis` | `86400000` | Transaction lifetime from `raw_data.timestamp`; txgen rewrites `raw_data.expiration`, `raw_data_hex`, and `txID` before signing. |
 | `generate` | `trc20FeeLimit` | `100000000` | Fee limit (SUN) on TRC20 calls. 100 TRX is plenty for a vanilla `transfer`. |
 | `generate` | `pq.enabled` | `false` | Mix in post-quantum signing (`pq_auth_sig`). See [Post-quantum transactions](#post-quantum-pq--抗量子-transactions). |
 | `generate` | `pq.scheme` | `ML_DSA_44` | PQ scheme. Only `ML_DSA_44` is supported. |
@@ -323,7 +330,7 @@ txgen reads a single JSON file (default `./txgen.json`, override with `-c` / `--
 | `generate: balance is not sufficient` (in node logs) | Sender ran out of TRX mid-run | Top up the sender, or shrink `totalTxCount`. |
 | `broadcast fail: SIGERROR: ...` | Signature didn't verify | Confirm the sender key matches the address that owns the source funds. Re-run `generate`. |
 | `broadcast fail: DUP_TRANSACTION_ERROR` | Same CSV was broadcast twice | Normal on a re-run. Move the old CSV out of `inputDir`. |
-| `broadcast fail: ... transaction expiration ...` | CSV is older than the node's expiration window | Re-run `generate`, then `broadcast` within ~60s, or raise `block.maxTimeUntilExpiration` in node config. |
+| `broadcast fail: ... transaction expiration ...` | CSV is older than `generate.expirationMillis` | Re-run `generate`, or raise `generate.expirationMillis` before generating. |
 | `statistic: fetch block X` | Block doesn't exist yet, or RPC is filtered | Tighten the range, or wait until the chain catches up. |
 
 ---
