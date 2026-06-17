@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/runtime"
 	"github.com/tronprotocol/tron-deployment/internal/security"
@@ -44,6 +45,33 @@ func (nc *nodeContext) runtimeExec(ctx context.Context, bin string, args ...stri
 	}
 	full := append([]string{"exec", nc.Node.Name, bin}, args...)
 	return nc.Target.Exec(ctx, "docker", full...)
+}
+
+// requirePrivateForNode enforces the --require-private / TROND_REQUIRE_PRIVATE
+// safety gate against a node's RECORDED network, using state ONLY — no target
+// resolution. Mutators must call this BEFORE resolveNodeContext (which opens
+// the target and can fail with TARGET_UNREACHABLE, masking the gate) and
+// before any HUMAN_REQUIRED confirmation, so an agent learns "not private"
+// first. Fast path: when the gate is off it reads no state at all. A missing
+// node returns nil here — resolveNodeContext emits the canonical
+// NODE_NOT_FOUND so the message isn't duplicated.
+func requirePrivateForNode(name string) error {
+	if !guard.Requested() {
+		return nil
+	}
+	store, err := state.NewStore(statePath())
+	if err != nil {
+		return err
+	}
+	deployState, err := store.Load()
+	if err != nil {
+		return err
+	}
+	node := store.GetNode(deployState, name)
+	if node == nil {
+		return nil
+	}
+	return guard.Enforce(node.Network)
 }
 
 // resolveNodeContext loads a node from state and constructs its target and runtime.

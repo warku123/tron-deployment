@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 )
@@ -31,8 +32,8 @@ func TestRunApply_RequirePrivate_RefusesNonPrivate(t *testing.T) {
 	t.Cleanup(func() { paths.SetBaseDir("") })
 
 	// Global flag state is package-level; save + restore.
-	oldPath, oldReq := applyIntentPath, applyRequirePrivate
-	t.Cleanup(func() { applyIntentPath, applyRequirePrivate = oldPath, oldReq })
+	oldPath, oldReq := applyIntentPath, guard.FlagValue
+	t.Cleanup(func() { applyIntentPath, guard.FlagValue = oldPath, oldReq })
 
 	intentPath := filepath.Join(t.TempDir(), "intent.yaml")
 	body := "name: guard-test\nnetwork: mainnet\n" +
@@ -45,7 +46,7 @@ func TestRunApply_RequirePrivate_RefusesNonPrivate(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 	applyIntentPath = intentPath
-	applyRequirePrivate = true
+	guard.FlagValue = true
 
 	err := runApply(cmd, nil)
 	if err == nil {

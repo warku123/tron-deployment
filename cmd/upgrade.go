@@ -30,6 +30,10 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	start := time.Now()
 
+	if err := requirePrivateForNode(name); err != nil {
+		return err
+	}
+
 	nc, err := resolveNodeContext(name)
 	if err != nil {
 		return err

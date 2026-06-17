@@ -11,6 +11,7 @@ import (
 	networkCmd "github.com/tronprotocol/tron-deployment/cmd/network"
 	shadowforkCmd "github.com/tronprotocol/tron-deployment/cmd/shadowfork"
 	snapshotCmd "github.com/tronprotocol/tron-deployment/cmd/snapshot"
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 )
@@ -70,6 +71,12 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable ANSI colors")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "Config file (default ~/.trond/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&stateDirFlag, "state-dir", "", "Directory for state.json, audit.log, deployments (default ~/.trond, env: TROND_STATE_DIR)")
+	// Persistent safety gate: refuse any mutating verb unless the node's
+	// network is private. A one-way floor — this flag OR a truthy
+	// TROND_REQUIRE_PRIVATE turns it on; once on it cannot be disabled for
+	// the invocation. See internal/guard.
+	rootCmd.PersistentFlags().BoolVar(&guard.FlagValue, "require-private", false,
+		"Refuse to mutate a node unless its network is private (also: "+guard.EnvVar+"; a one-way safety floor for unattended agents)")
 }
 
 // Root returns the configured root cobra command, used by the doc/manpage
