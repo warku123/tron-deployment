@@ -145,8 +145,31 @@ trond verify --intent intent.yaml --timeout 5m -o json
 # 6. Status — readable summary the agent shows the user.
 trond status my-fullnode -o json
 # Output: {"name":"...", "status":"running", "block_height": ...,
-#          "peer_count": 12, "is_synced": true, "api_endpoints":{...}}
+#          "peer_count": 12, "is_synced": true, "healthy": true,
+#          "container_id": "<64-hex>", "api_endpoints":{...},
+#          "logs": {"runtime":"docker","container":"...","path":"/java-tron/logs/tron.log"}}
 ```
+
+**Machine-observable rig state (status / inspect `-o json`):**
+- `healthy` (bool) — liveness gate: "is the RPC serving blocks?". Always
+  present; `true` only when `status=running` AND the live `getnowblock`
+  probe returned a REAL block (non-zero block timestamp — an empty/error
+  200 does not count). It does NOT mean fully synced: `healthy` can be
+  `true` while `is_synced` is `false` on a node whose tip is stale, so gate
+  liveness on `healthy` and sync on `is_synced`/`block_height`. Fail-safe
+  `false` when stopped, unreachable, or the probe was skipped.
+- `container_id` (string) — full 64-hex docker container ID, so an agent
+  can `docker exec`/attach the exact container. Best-effort; present for
+  running/stopped docker nodes, absent for jar nodes or when the daemon
+  is unreachable.
+- `logs` (object) — runtime-discriminated locator for reading node logs
+  without screen-scraping (point `mcp-logs` here). `runtime=docker`:
+  `docker exec <container> cat <path>` (java-tron logs to a file *inside*
+  the container, not stdout). `runtime=jar`: `journalctl -u <unit>`.
+- `api_endpoints.http` is the private-net RPC — point read-only on-chain
+  readers (e.g. `tron-toolkit`) at it for the verify half of a loop.
+- `chain_id` is NOT yet emitted (TRON's chain id is genesis-derived, not
+  a single cheap RPC field) — tracked in TODOS.md.
 
 **Idempotency**: `apply` is hash-gated. Same intent → no-op. Changed
 intent without `--auto-approve` → exit 10. The agent should always

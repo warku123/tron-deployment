@@ -62,7 +62,14 @@ import (
 //	        `is_private` (the C1 private-net safety fact); new
 //	        `apply` / `network create --require-private` gate. Additive
 //	        optional fields.
-const SchemaVersion = "1.8.0"
+//	1.9.0 — status output gains `healthy`, `container_id`, and a
+//	        runtime-discriminated `logs` locator; inspect output gains
+//	        `logs` (and now populates the already-declared `container_id`).
+//	        Completes the ai-ops A1 ask (machine-observable rig state:
+//	        container_id + node-log paths) so external read-only tools
+//	        (tron-toolkit, mcp-logs) can attach with zero new code.
+//	        Additive optional fields.
+const SchemaVersion = "1.9.0"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

@@ -30,7 +30,17 @@
             "type": "string",
             "description": "Internal docker network IP of the container; absent for jar runtime."
           },
-          "container_id": { "type": "string" },
+          "container_id": { "type": "string", "description": "Full 64-hex docker container ID (best-effort, local docker nodes only)." },
+          "logs": {
+            "type": "object",
+            "description": "Runtime-discriminated log locator (same shape as `trond status` -o json). docker: read `path` inside `container` via `docker exec`; jar: read the systemd `unit`'s journal.",
+            "properties": {
+              "runtime":   { "type": "string", "enum": ["docker", "jar"] },
+              "container": { "type": "string" },
+              "path":      { "type": "string" },
+              "unit":      { "type": "string" }
+            }
+          },
           "labels":       { "type": "object", "additionalProperties": { "type": "string" } },
           "network":      { "type": "string" }
         }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/state"
 )
@@ -178,15 +179,21 @@ func manifestForNode(ctx context.Context, n *state.ManagedNode) map[string]any {
 		"target":       n.Target,
 		"last_applied": n.LastApplied,
 		"endpoints":    endpoints,
+		// logs: runtime-discriminated locator so a log consumer knows how
+		// to read this node's logs without screen-scraping (A1).
+		"logs": apply.LogsDescriptor(n),
 	}
 
-	// Best-effort container IP for docker nodes — only attempted if the
-	// node is local; SSH inspect would need a remote docker call which
+	// Best-effort container IP + ID for docker nodes — only attempted if
+	// the node is local; SSH inspect would need a remote docker call which
 	// pulls in target resolution. The test harness usually runs on the
 	// same host as the docker daemon, so this is the common case.
 	if n.Runtime == "docker" && n.Target.Type == "local" {
 		if ip := dockerContainerIP(ctx, n.Name); ip != "" {
 			entry["container_ip"] = ip
+		}
+		if id := dockerContainerID(ctx, n.Name); id != "" {
+			entry["container_id"] = id
 		}
 	}
 
@@ -209,4 +216,17 @@ func dockerContainerIP(ctx context.Context, name string) string {
 		return ""
 	}
 	return ip
+}
+
+// dockerContainerID shells out to docker inspect for the full container ID.
+// Validation (64-hex, reject docker error text) is shared with
+// apply.ContainerID via apply.NormalizeContainerID so the format rule has a
+// single source of truth across the local (string) and target.Exec ([]byte)
+// paths.
+func dockerContainerID(ctx context.Context, name string) string {
+	out, err := localDockerExec(ctx, "inspect", "-f", "{{.Id}}", name)
+	if err != nil {
+		return ""
+	}
+	return apply.NormalizeContainerID(out)
 }
