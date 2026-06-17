@@ -51,6 +51,7 @@ Subcommands:
   generate     Build + sign synthetic txs → CSV files (receivers auto-generated)
   broadcast    Replay generated CSV at a target TPS → report
   statistic    Compute on-chain TPS for a block range
+  keygen       Generate a post-quantum keypair (FN_DSA_512 requires build-txgen-falcon)
   help         Print this help
 
 Flags:
@@ -67,6 +68,12 @@ func main() {
 	switch os.Args[1] {
 	case "help", "-h", "--help":
 		fmt.Print(usage)
+		return
+	case "keygen":
+		// keygen does not use a config file; parse its own flags.
+		if err := runKeygen(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
 		return
 	case "generate", "broadcast", "statistic":
 		// known subcommand; validated here so the os.Exit below runs

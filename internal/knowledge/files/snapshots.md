@@ -222,3 +222,81 @@ version change.
   - The tarball got corrupted in flight or the mirror is serving a
     different file than its sidecar advertises. Retry; if the mismatch
     persists, switch `--region` or `--domain`.
+
+## Local database backup with `db_cp`
+
+`scripts/db_cp.sh` makes a fast, space-efficient local copy of a
+java-tron LevelDB/RocksDB database directory. It is the recommended way
+to snapshot an already-extracted database before a risky operation (node
+upgrade, config migration, shadow-fork mutation, etc.).
+
+### Why not plain `cp -r`?
+
+A mainnet database is hundreds of GB of `.sst` immutable segment files.
+`cp` would duplicate every byte. `db_cp` hard-links `.sst` files instead
+— the destination shares the same data blocks, so the copy is nearly
+instantaneous and uses negligible extra disk space. Only the small
+bookkeeping files (LOCK, CURRENT, MANIFEST, OPTIONS) get independent
+inodes, which is required so each copy can be opened independently by
+java-tron.
+
+### Requirements
+
+- `rsync` (handles the non-`.sst` tree)
+- `ln` (POSIX hard-link; src and dst must be on the **same filesystem**)
+
+### Usage
+
+```bash
+# source the function into the current shell
+source scripts/db_cp.sh
+
+# one-liner backup with a timestamp suffix
+db_cp \
+  /data/tron/output-directory/mainnet/database \
+  /data/tron/output-directory/mainnet/database-backup-$(date +%Y%m%d-%H%M%S)
+```
+
+Or run it directly as a script:
+
+```bash
+./scripts/db_cp.sh <src> <dst>
+```
+
+### Disk-space accounting
+
+| File type | Copy method | Incremental disk cost |
+|---|---|---|
+| `.sst` segment files | `ln` (hard-link) | ~0 (shared blocks) |
+| LOCK / CURRENT / MANIFEST / OPTIONS | `rsync` (full copy) | bytes, negligible |
+
+The destination directory must not exist before the call — `db_cp`
+refuses to clobber an existing path.
+
+### Typical workflow
+
+```bash
+# 1. Stop the node (or use a quiesced snapshot)
+trond stop --node mainnet-1
+
+# 2. Back up the database
+source scripts/db_cp.sh
+db_cp \
+  /data/tron/output-directory/mainnet/database \
+  /data/tron/output-directory/mainnet/database-bak-$(date +%Y%m%d-%H%M%S)
+
+# 3. Perform the risky operation (upgrade, mutation, …)
+trond apply --intent intent.yaml --auto-approve --wait
+
+# 4. If something goes wrong, restore:
+#    stop the node, delete the current database, rename the backup back.
+```
+
+### Limitations
+
+- Hard-links only work within a single filesystem. If src and dst are on
+  different block devices, `ln` will fail. Use `rsync -a` instead — it
+  will be slower and use full disk space.
+- Do **not** use `db_cp` on a live, write-active node. java-tron may be
+  mid-compaction, leaving `.sst` files in a transient state. Stop the
+  node (or use an OS-level snapshot) first.

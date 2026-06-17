@@ -13,13 +13,42 @@ Useful for:
 
 ```bash
 # From the tron-deployment repo root
-make build-txgen        # → bin/txgen
+make build-txgen        # → bin/txgen  (pure Go, no CGO)
 make install-txgen      # → $(GOBIN)/txgen
 ```
 
-Requires Go 1.21+. Builds a single ~10 MB static binary.
+Requires Go 1.21+. Builds a single ~10 MB static binary with no external runtime dependencies.
 
 The HTTP broadcast layer lives in `tools/common/broadcast/` and is shared with `tools/replay/`.
+
+### Build variants
+
+| Make target | CGO | Falcon-512 | Portability |
+|---|---|---|---|
+| `build-txgen` | No | No (stub returns error) | Any platform, cross-compile works |
+| `build-txgen-falcon` | Yes (liboqs) | Yes | Must build on target platform; liboqs required |
+
+**`build-txgen` is the default and the only variant built in CI.** The `falcon` build tag is off by
+default so Go's standard cross-compilation and static-binary guarantees are preserved.
+
+`build-txgen-falcon` requires [liboqs](https://github.com/open-quantum-safe/liboqs) ≥ 0.10 installed
+as a C library. It uses CGO, which means:
+
+- A C compiler must be present at build time on every target platform.
+- Cross-compilation (`GOOS=linux` from macOS) does not work without a cross-toolchain.
+- The binary dynamically links `liboqs.so` at runtime unless you also pass `-extldflags="-static"`.
+
+**CI behaviour:** `make build-txgen-falcon` detects whether liboqs is installed and **skips with a
+warning (exit 0)** rather than failing when it is not found. This means CI runners without liboqs
+installed will silently skip the falcon binary; they still build and test the pure-Go binary via
+`make build-txgen`.
+
+Local install (macOS):
+
+```bash
+brew install liboqs
+make build-txgen-falcon   # → bin/txgen with Falcon-512 support
+```
 
 ---
 
@@ -42,7 +71,8 @@ Save this as `txgen.json` next to the binary:
     "privateKey": "<64-hex-char sender key>",
     "outputDir": "txgen-output",
     "txType": { "transfer": 100, "transferTrc10": 0, "transferTrc20": 0 },
-    "transferAmount": 1
+    "transferAmount": 1,
+    "expirationMillis": 86400000
   },
 
   "broadcast": {
@@ -63,7 +93,10 @@ txgen generate -c txgen.json
 
 `generate` first builds `receiverAddressCount` fresh secp256k1 receivers (dumped to `txgen-output/receivers.csv` for auditability or `db fork` pre-funding), then builds `totalTxCount` signed TRX transfers fanning out across those receivers and splits them into `txgen-output/generate-tx-NNNN.csv`. Workers issue one HTTP round-trip per tx to the node (`/wallet/createtransaction`) for the unsigned form, then sign locally with secp256k1.
 
-**Time-sensitive:** the node stamps each tx with `expiration = head_block_time + 60s` by default. Broadcast within a minute, or raise `block.maxTimeUntilExpiration` in the node's `config.conf` first.
+By default txgen rewrites each unsigned transaction before signing so
+`raw_data.expiration = raw_data.timestamp + 86400000` (1 day). Override this
+with `generate.expirationMillis` when you need a shorter or longer broadcast
+window.
 
 ### 3. Broadcast to the private chain
 
@@ -166,11 +199,13 @@ transactions that should be PQ-signed (the rest are ECDSA-signed):
   (when `ratio == 100`, `privateKey` is not needed). The PQ sender is derived from
   `pq.seed` as `0x41 ‖ Keccak-256(public_key)[12..32]`. `txgen generate` logs both
   sender addresses at startup.
-- **Scheme.** Only `ML_DSA_44` (FIPS 204 ML-DSA-44 / CRYSTALS-Dilithium-2) is
-  supported. It interoperates with the node's BouncyCastle verifier. Falcon-512
-  (`FN_DSA_512`) is **not** supported: java-tron uses a BouncyCastle/EIP-8052
-  specific wire encoding that no Go library reproduces, so a Go-signed Falcon
-  signature would be rejected on-chain.
+- **Scheme.** Two schemes are available:
+  - `ML_DSA_44` (FIPS 204 / CRYSTALS-Dilithium-2) — supported in the **default
+    pure-Go build** (`make build-txgen`). No extra dependencies.
+  - `FN_DSA_512` (Falcon-512) — supported only in the **falcon build**
+    (`make build-txgen-falcon`, requires liboqs). The default build returns an
+    error if `FN_DSA_512` is requested. See [Build variants](#build-variants) for
+    details on the CGO/liboqs requirement and portability trade-offs.
 - **Account provisioning (required).** The node only accepts a PQ signature when
   the PQ sender account's permission already contains this PQ public key with
   enough weight. Install it out-of-band (e.g. via `AccountPermissionUpdate`)
@@ -187,7 +222,8 @@ transactions that should be PQ-signed (the rest are ECDSA-signed):
 
 Common helpers:
 - `Toolkit.jar db fork` with `<outputDir>/receivers.csv` to pre-fund receivers in one shot.
-- Raise `block.maxTimeUntilExpiration` in node config if your generate→broadcast gap is longer than 60s.
+- `generate.expirationMillis` defaults to 1 day, so generated CSVs can be
+  broadcast after the node's default 60 second transaction window.
 
 ---
 
@@ -263,6 +299,7 @@ txgen reads a single JSON file (default `./txgen.json`, override with `-c` / `--
     "trc10Id": "1000001",
     "trc20Address": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
     "transferAmount": 1,
+    "expirationMillis": 86400000,
     "trc20FeeLimit": 100000000
   },
 
@@ -298,9 +335,10 @@ txgen reads a single JSON file (default `./txgen.json`, override with `-c` / `--
 | `generate` | `trc10Id` | — | TRC10 token id (numeric string). Required iff `transferTrc10 > 0`. |
 | `generate` | `trc20Address` | — | TRC20 contract address (base58 or hex). Required iff `transferTrc20 > 0`. |
 | `generate` | `transferAmount` | `1` | Amount per tx in the smallest unit (SUN for TRX, raw token units otherwise). |
+| `generate` | `expirationMillis` | `86400000` | Transaction lifetime from `raw_data.timestamp`; txgen rewrites `raw_data.expiration`, `raw_data_hex`, and `txID` before signing. |
 | `generate` | `trc20FeeLimit` | `100000000` | Fee limit (SUN) on TRC20 calls. 100 TRX is plenty for a vanilla `transfer`. |
 | `generate` | `pq.enabled` | `false` | Mix in post-quantum signing (`pq_auth_sig`). See [Post-quantum transactions](#post-quantum-pq--抗量子-transactions). |
-| `generate` | `pq.scheme` | `ML_DSA_44` | PQ scheme. Only `ML_DSA_44` is supported. |
+| `generate` | `pq.scheme` | `ML_DSA_44` | PQ scheme: `ML_DSA_44` (default build) or `FN_DSA_512` (falcon build only, requires liboqs). |
 | `generate` | `pq.seed` | — (required iff `pq.enabled`) | 32-byte hex (64 chars) seed; derives the PQ keypair and sender address. |
 | `generate` | `pq.ratio` | `100` | Percent of txs PQ-signed (1–100); the rest are ECDSA-signed. Only used when `pq.enabled`. |
 | `broadcast` | `inputDir` | = `generate.outputDir` | Where to find `generate-tx-*.csv`. |
@@ -323,7 +361,7 @@ txgen reads a single JSON file (default `./txgen.json`, override with `-c` / `--
 | `generate: balance is not sufficient` (in node logs) | Sender ran out of TRX mid-run | Top up the sender, or shrink `totalTxCount`. |
 | `broadcast fail: SIGERROR: ...` | Signature didn't verify | Confirm the sender key matches the address that owns the source funds. Re-run `generate`. |
 | `broadcast fail: DUP_TRANSACTION_ERROR` | Same CSV was broadcast twice | Normal on a re-run. Move the old CSV out of `inputDir`. |
-| `broadcast fail: ... transaction expiration ...` | CSV is older than the node's expiration window | Re-run `generate`, then `broadcast` within ~60s, or raise `block.maxTimeUntilExpiration` in node config. |
+| `broadcast fail: ... transaction expiration ...` | CSV is older than `generate.expirationMillis` | Re-run `generate`, or raise `generate.expirationMillis` before generating. |
 | `statistic: fetch block X` | Block doesn't exist yet, or RPC is filtered | Tighten the range, or wait until the chain catches up. |
 
 ---

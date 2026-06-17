@@ -86,13 +86,8 @@ func runBroadcast(ctx context.Context, cfg *Config) error {
 		failCount atomic.Int64
 		wg        sync.WaitGroup
 	)
-	workers := cfg.Broadcast.TpsLimit / 50
-	if workers < 4 {
-		workers = 4
-	}
-	if workers > 256 {
-		workers = 256
-	}
+	workers := cfg.Broadcast.Workers
+	log.Printf("broadcast: workers=%d tpsLimit=%d", workers, cfg.Broadcast.TpsLimit)
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func() {

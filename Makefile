@@ -41,7 +41,7 @@ endif
 
 GOFLAGS    ?=
 
-.PHONY: build test lint e2e build-all clean clean-all fmt vet tidy sync-templates sync-schemas sync-knowledge snapshot-schema-baseline update-render-golden docs man cover vuln bootstrap-go build-replay install-replay build-txgen install-txgen
+.PHONY: build test lint e2e build-all clean clean-all fmt vet tidy sync-templates sync-schemas sync-knowledge snapshot-schema-baseline update-render-golden docs man cover vuln bootstrap-go build-replay install-replay build-txgen install-txgen build-txgen-falcon install-txgen-falcon
 
 ## bootstrap-go: Download + verify the project-local Go toolchain
 ##               (idempotent; safe to re-run; no-op if already current)
@@ -202,3 +202,38 @@ build-txgen: $(GO_BOOTSTRAP)
 install-txgen: build-txgen
 	cp bin/txgen $(GOBIN)/txgen
 	@echo "✓ txgen installed at $(GOBIN)/txgen"
+
+# --- liboqs pkg-config helpers (used by build-txgen-falcon) ------------------
+# Falls back to common homebrew paths when pkg-config is not found or liboqs
+# is not registered. Override by setting LIBOQS_CFLAGS / LIBOQS_LDFLAGS in
+# the environment before calling make.
+LIBOQS_CFLAGS  ?= $(shell pkg-config --cflags liboqs 2>/dev/null || echo -I/usr/local/include -I/opt/homebrew/include)
+LIBOQS_LDFLAGS ?= $(shell pkg-config --libs   liboqs 2>/dev/null || echo -L/usr/local/lib -L/opt/homebrew/lib -loqs)
+OPENSSL_LDFLAGS ?= $(shell pkg-config --libs  openssl 2>/dev/null || echo -L/usr/local/opt/openssl@3/lib -L/opt/homebrew/opt/openssl@3/lib -lcrypto)
+
+## build-txgen-falcon: Build bin/txgen with Falcon-512 (FN_DSA_512) support.
+##              Requires liboqs ≥ 0.10 installed (brew install liboqs on macOS).
+##              Uses CGO + liboqs C library; produces a larger binary that can
+##              sign FN_DSA_512 PQ transactions in addition to ML_DSA_44.
+##              Skipped with a warning (exit 0) when liboqs is not installed,
+##              so CI runners without liboqs do not fail.
+build-txgen-falcon: $(GO_BOOTSTRAP)
+	@if ! (pkg-config --exists liboqs 2>/dev/null || \
+	       [ -f /usr/local/include/oqs/oqs.h ] || \
+	       [ -f /opt/homebrew/include/oqs/oqs.h ]); then \
+		echo "⚠  liboqs not found — skipping build-txgen-falcon"; \
+		echo "   Install with: brew install liboqs  (macOS)"; \
+		echo "   or build from source: https://github.com/open-quantum-safe/liboqs"; \
+		exit 0; \
+	fi
+	@mkdir -p bin
+	CGO_ENABLED=1 \
+	CGO_CFLAGS="$(LIBOQS_CFLAGS)" \
+	CGO_LDFLAGS="$(LIBOQS_LDFLAGS) $(OPENSSL_LDFLAGS)" \
+	$(GO) build -tags falcon -ldflags "$(LDFLAGS)" -o bin/txgen ./tools/txgen
+	@echo "✓ bin/txgen (with Falcon-512 via liboqs) built"
+
+## install-txgen-falcon: Build + copy Falcon-enabled txgen into $(GOBIN).
+install-txgen-falcon: build-txgen-falcon
+	cp bin/txgen $(GOBIN)/txgen
+	@echo "✓ txgen (with Falcon-512) installed at $(GOBIN)/txgen"

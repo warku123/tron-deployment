@@ -33,10 +33,8 @@ import (
 // inspectable in a text editor.
 //
 // Note on expiration: the node assigns expiration = head_block_time +
-// 60s by default for HTTP-built transactions. txgen does NOT extend
-// that, so generated txs must be broadcast quickly (within a minute on
-// mainnet pacing, longer on a slow private chain). If you need long
-// shelf-life txs, raise `block.maxTimeUntilExpiration` in node config.
+// 60s by default for HTTP-built transactions. txgen rewrites raw_data
+// before signing so generated transactions use cfg.Generate.ExpirationMillis.
 func runGenerate(ctx context.Context, cfg *Config) error {
 	if err := os.MkdirAll(cfg.Generate.OutputDir, 0o755); err != nil {
 		return err
@@ -155,10 +153,32 @@ func buildSigners(cfg *Config) (*signerSet, error) {
 	set := &signerSet{}
 
 	if pqcfg.Enabled {
-		ps, err := NewPQSigner(pqcfg.Scheme, pqcfg.Seed)
-		if err != nil {
-			return nil, fmt.Errorf("init pq signer: %w", err)
+		type pqSigner interface {
+			SchemeName() string
+			PublicKeyHex() string
+			HexAddress() string
+			Base58Address() string
+			Sign(txIDHex string) ([]byte, error)
 		}
+
+		var ps pqSigner
+		switch pqcfg.Scheme {
+		case SchemeMLDSA44:
+			s, err := NewPQSigner(pqcfg.Scheme, pqcfg.Seed)
+			if err != nil {
+				return nil, fmt.Errorf("init pq signer: %w", err)
+			}
+			ps = s
+		case SchemeFNDSA512:
+			s, err := NewFalconSigner(pqcfg.PrivateKey, pqcfg.PublicKey)
+			if err != nil {
+				return nil, fmt.Errorf("init falcon signer: %w", err)
+			}
+			ps = s
+		default:
+			return nil, fmt.Errorf("unsupported pq scheme %q", pqcfg.Scheme)
+		}
+
 		set.pqRatio = pqcfg.Ratio
 		set.pq = &signer{
 			senderHex: ps.HexAddress(),
@@ -287,6 +307,10 @@ func generateBatch(
 			unsigned, buildErr = node.CreateTRC20Transfer(ctx, sgn.senderHex, c20, receiver, cfg.Generate.TransferAmount, cfg.Generate.TRC20FeeLimit)
 		}
 		if buildErr != nil {
+			fail++
+			continue
+		}
+		if err := unsigned.ExtendExpiration(cfg.Generate.ExpirationMillis); err != nil {
 			fail++
 			continue
 		}

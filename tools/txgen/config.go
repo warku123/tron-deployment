@@ -23,6 +23,7 @@ type Config struct {
 		Concurrency          int    `json:"concurrency"`
 		PrivateKey           string `json:"privateKey"`
 		OutputDir            string `json:"outputDir"`
+		ExpirationMillis     int64  `json:"expirationMillis"`
 		TxType               struct {
 			Transfer      int `json:"transfer"`
 			TransferTRC10 int `json:"transferTrc10"`
@@ -35,14 +36,22 @@ type Config struct {
 
 		// PQ: when enabled, a `ratio` percent of transactions are signed
 		// with a post-quantum scheme and carry a pq_auth_sig instead of the
-		// ECDSA signature; the remainder are ECDSA-signed. The PQ sender is
-		// derived from the PQ seed (its account permission must already
-		// register this PQ public key); the ECDSA sender from privateKey.
+		// ECDSA signature; the remainder are ECDSA-signed.
+		//
+		// ML_DSA_44: set scheme="ML_DSA_44" and seed (32-byte hex, 64 chars).
+		// The keypair is derived deterministically from the seed.
+		//
+		// FN_DSA_512 (Falcon-512): set scheme="FN_DSA_512" and provide the
+		// privateKey (1281-byte liboqs SK, 2562 hex chars) and publicKey
+		// (896-byte h polynomial, 1792 hex chars). Generate a keypair with
+		// `txgen keygen` (requires build-txgen-falcon).
 		PQ struct {
-			Enabled bool   `json:"enabled"`
-			Scheme  string `json:"scheme"` // only "ML_DSA_44" is supported
-			Seed    string `json:"seed"`   // 32-byte hex (64 hex chars)
-			Ratio   int    `json:"ratio"`  // percent of txs PQ-signed, 1-100 (default 100)
+			Enabled    bool   `json:"enabled"`
+			Scheme     string `json:"scheme"`     // "ML_DSA_44" or "FN_DSA_512"
+			Seed       string `json:"seed"`       // ML_DSA_44: 32-byte hex (64 hex chars)
+			PrivateKey string `json:"privateKey"` // FN_DSA_512: liboqs SK hex (2562 chars)
+			PublicKey  string `json:"publicKey"`  // FN_DSA_512: h polynomial hex (1792 chars)
+			Ratio      int    `json:"ratio"`      // percent of txs PQ-signed, 1-100 (default 100)
 		} `json:"pq"`
 	} `json:"generate"`
 
@@ -50,6 +59,7 @@ type Config struct {
 	Broadcast struct {
 		InputDir   string `json:"inputDir"`
 		TpsLimit   int    `json:"tpsLimit"`
+		Workers    int    `json:"workers"` // concurrent HTTP workers; 0 = auto (tpsLimit/50, min 4, max 256)
 		SaveTxID   bool   `json:"saveTxId"`
 		TxIDFile   string `json:"txIdFile"`
 		ReportFile string `json:"reportFile"`
@@ -97,6 +107,9 @@ func (c *Config) applyDefaults() {
 	if c.Generate.TransferAmount == 0 {
 		c.Generate.TransferAmount = 1
 	}
+	if c.Generate.ExpirationMillis == 0 {
+		c.Generate.ExpirationMillis = 86_400_000 // 1 day
+	}
 	if c.Generate.TRC20FeeLimit == 0 {
 		c.Generate.TRC20FeeLimit = 100_000_000 // 100 TRX
 	}
@@ -115,6 +128,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Broadcast.TpsLimit == 0 {
 		c.Broadcast.TpsLimit = 1000
+	}
+	if c.Broadcast.Workers == 0 {
+		c.Broadcast.Workers = c.Broadcast.TpsLimit / 50
+		if c.Broadcast.Workers < 4 {
+			c.Broadcast.Workers = 4
+		}
+		if c.Broadcast.Workers > 256 {
+			c.Broadcast.Workers = 256
+		}
 	}
 	if c.Broadcast.TxIDFile == "" {
 		c.Broadcast.TxIDFile = "broadcast-txid.csv"
@@ -143,11 +165,20 @@ func (c *Config) validate() error {
 		return fmt.Errorf("generate.txType weights must sum to 100, got %d", sum)
 	}
 	if c.Generate.PQ.Enabled {
-		if c.Generate.PQ.Scheme != SchemeMLDSA44 {
-			return fmt.Errorf("generate.pq.scheme %q unsupported (only %s)", c.Generate.PQ.Scheme, SchemeMLDSA44)
-		}
-		if len(c.Generate.PQ.Seed) != pqSeedHexLen {
-			return fmt.Errorf("generate.pq.seed must be %d hex chars (32 bytes)", pqSeedHexLen)
+		switch c.Generate.PQ.Scheme {
+		case SchemeMLDSA44:
+			if len(c.Generate.PQ.Seed) != pqSeedHexLen {
+				return fmt.Errorf("generate.pq.seed must be %d hex chars (32 bytes) for ML_DSA_44", pqSeedHexLen)
+			}
+		case SchemeFNDSA512:
+			if len(c.Generate.PQ.PrivateKey) != falconSKHexLen {
+				return fmt.Errorf("generate.pq.privateKey must be %d hex chars (%d bytes) for FN_DSA_512", falconSKHexLen, falconSKLen)
+			}
+			if len(c.Generate.PQ.PublicKey) != falconHHexLen {
+				return fmt.Errorf("generate.pq.publicKey must be %d hex chars (%d bytes h polynomial) for FN_DSA_512", falconHHexLen, falconHLen)
+			}
+		default:
+			return fmt.Errorf("generate.pq.scheme %q unsupported (supported: %s, %s)", c.Generate.PQ.Scheme, SchemeMLDSA44, SchemeFNDSA512)
 		}
 		if c.Generate.PQ.Ratio < 1 || c.Generate.PQ.Ratio > 100 {
 			return fmt.Errorf("generate.pq.ratio must be 1-100, got %d", c.Generate.PQ.Ratio)
@@ -174,6 +205,9 @@ func (c *Config) validate() error {
 	}
 	if c.Generate.ReceiverAddressCount <= 0 {
 		return errors.New("generate.receiverAddressCount must be > 0")
+	}
+	if c.Generate.ExpirationMillis < 0 {
+		return errors.New("generate.expirationMillis must be >= 0")
 	}
 	return nil
 }
