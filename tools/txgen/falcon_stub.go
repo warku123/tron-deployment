@@ -20,12 +20,12 @@ type FalconSigner struct{}
 // NewFalconSigner always returns errFalconUnavailable in non-falcon builds.
 func NewFalconSigner(_, _ string) (*FalconSigner, error) { return nil, errFalconUnavailable }
 
-func (s *FalconSigner) Close()                          {}
-func (s *FalconSigner) Sign(_ string) ([]byte, error)   { return nil, errFalconUnavailable }
-func (s *FalconSigner) SchemeName() string               { return SchemeFNDSA512 }
-func (s *FalconSigner) PublicKeyHex() string             { return "" }
-func (s *FalconSigner) HexAddress() string               { return "" }
-func (s *FalconSigner) Base58Address() string            { return "" }
+func (s *FalconSigner) Close()                        {}
+func (s *FalconSigner) Sign(_ string) ([]byte, error) { return nil, errFalconUnavailable }
+func (s *FalconSigner) SchemeName() string            { return SchemeFNDSA512 }
+func (s *FalconSigner) PublicKeyHex() string          { return "" }
+func (s *FalconSigner) HexAddress() string            { return "" }
+func (s *FalconSigner) Base58Address() string         { return "" }
 
 // FalconKeypair holds a freshly generated Falcon-512 keypair.
 type FalconKeypair struct {

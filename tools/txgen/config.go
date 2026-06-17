@@ -59,7 +59,7 @@ type Config struct {
 	Broadcast struct {
 		InputDir   string `json:"inputDir"`
 		TpsLimit   int    `json:"tpsLimit"`
-		Workers    int    `json:"workers"`    // concurrent HTTP workers; 0 = auto (tpsLimit/50, min 4, max 256)
+		Workers    int    `json:"workers"` // concurrent HTTP workers; 0 = auto (tpsLimit/50, min 4, max 256)
 		SaveTxID   bool   `json:"saveTxId"`
 		TxIDFile   string `json:"txIdFile"`
 		ReportFile string `json:"reportFile"`

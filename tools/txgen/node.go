@@ -13,8 +13,9 @@ import (
 	"strings"
 	"time"
 
-	tronpb "github.com/tronprotocol/tron-deployment/internal/dbfork/proto/pb"
 	"google.golang.org/protobuf/proto"
+
+	tronpb "github.com/tronprotocol/tron-deployment/internal/dbfork/proto/pb"
 )
 
 // NodeClient wraps the subset of java-tron's HTTP API needed by txgen:
