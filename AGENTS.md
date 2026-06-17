@@ -555,6 +555,45 @@ topic; don't paraphrase from training data.
 
 ---
 
+## Safety — proving a rig is private (for unattended agents)
+
+An automated caller that should only ever touch a throwaway private chain
+(never mainnet/nile) can both **prove** and **enforce** that:
+
+- **Query the fact.** `status`, `apply`, `list`, and `inspect` (`-o json`)
+  all return `network` (`mainnet | nile | private`) and `is_private`
+  (bool). `is_private` is `true` only when `network == "private"`; it is
+  `false` for an empty/unknown network — fail-safe, so "I'm not sure"
+  reads as "not safe to mutate". Gate destructive actions on
+  `is_private == true`. (It is a LABEL check: a `private` intent that
+  re-points `seed.node.ip.list` at mainnet via `config_overrides` would
+  still report `is_private:true`. Deeper config-sniffing is a tracked
+  TODO; standard private rigs use the private template, which ships no
+  real seeds.)
+
+- **Enforce at deploy.** `apply --require-private` and
+  `network create --require-private` refuse any non-private intent up
+  front (error_code `PRIVATE_NETWORK_REQUIRED`, exit 2). The guard lives
+  in `apply.Apply()` core, so every deploy path inherits it. Pure opt-in —
+  default behaviour and mainnet deploys are unchanged. Pass it from a
+  sandboxed skill so the deploy is *mechanically* incapable of hitting
+  shared infra, instead of trusting a standing rule.
+
+The read-only verbs (`status`, `wait`, `inspect`, `list`, `diagnose`)
+never mutate; only `apply` / `remove` / `start|stop|restart` do — gate
+the mutating ones behind the `is_private` check. (`--require-private`
+currently enforces on `apply` + `network create`; the rarer mutators
+gate via the `is_private` query for now.)
+
+> ⚠️ **`network` means two things across commands.** In `apply` / `status`
+> / `list` / `inspect` it is the chain kind (`mainnet|nile|private`,
+> matching the intent's `network:` field). In **`network create`** output
+> it is the network's intent NAME. Don't carry the value from one across
+> to the other. (A rename of `network-create`'s field is a tracked TODO —
+> it's a breaking output-contract change, deferred to a deliberate bump.)
+
+---
+
 ## Anti-patterns — things to NEVER do
 
 1. **Don't silently retry HUMAN_REQUIRED with `--auto-approve`**. Exit

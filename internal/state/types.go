@@ -4,10 +4,15 @@ import "time"
 
 // ManagedNode represents a deployed node tracked in the state file.
 type ManagedNode struct {
-	Name            string     `json:"name"`
-	IntentHash      string     `json:"intent_hash"`
-	ConfigHash      string     `json:"config_hash"`
-	Version         string     `json:"version"`
+	Name       string `json:"name"`
+	IntentHash string `json:"intent_hash"`
+	ConfigHash string `json:"config_hash"`
+	Version    string `json:"version"`
+	// Network is the intent's `network:` value (mainnet | nile | private)
+	// recorded at apply time, so `status` can report it and derive the
+	// `is_private` safety fact without re-reading the intent. omitempty:
+	// nodes deployed before this field existed report it absent.
+	Network         string     `json:"network,omitempty"`
 	Target          NodeTarget `json:"target"`
 	Runtime         string     `json:"runtime"`
 	Status          string     `json:"status"` // running, stopped, error, unknown

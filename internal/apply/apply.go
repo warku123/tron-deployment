@@ -91,18 +91,30 @@ type Options struct {
 	// Result.WaitError / Result.Ready.
 	Wait        bool
 	WaitTimeout time.Duration
+
+	// RequirePrivate is the machine-enforced safety gate: when true,
+	// Apply refuses any non-private intent before doing anything. Lives
+	// in the core (not just cmd) so EVERY caller — CLI apply, network
+	// create, MCP — inherits the guarantee and it can't be bypassed by
+	// choosing a different entry point. Pure opt-in; callers set it.
+	RequirePrivate bool
 }
 
 // Result is the structured output of one Apply call. Stable JSON
 // shape (matches schemas/output/apply.schema.json) so MCP / recipe /
 // CLI presentations are interchangeable.
 type Result struct {
-	Name       string            `json:"name"`
-	Outcome    string            `json:"outcome"` // created | updated | no_change
-	IntentHash string            `json:"intent_hash"`
-	ConfigHash string            `json:"config_hash"`
-	Version    string            `json:"version"`
-	Runtime    string            `json:"runtime"`
+	Name       string `json:"name"`
+	Outcome    string `json:"outcome"` // created | updated | no_change
+	IntentHash string `json:"intent_hash"`
+	ConfigHash string `json:"config_hash"`
+	Version    string `json:"version"`
+	Runtime    string `json:"runtime"`
+	// Network + IsPrivate echo the deployed network and whether it is a
+	// private (agent-safe-to-mutate) net, so a caller sees the same
+	// safety fact `status --json` exposes without a second call.
+	Network    string            `json:"network"`
+	IsPrivate  bool              `json:"is_private"`
 	Endpoints  map[string]string `json:"endpoints"`
 	DurationMs int64             `json:"duration_ms"`
 
@@ -176,6 +188,16 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 	if err := validateOptions(opts); err != nil {
 		return nil, err
 	}
+
+	// Safety gate (opt-in): refuse a non-private intent before any side
+	// effect. Enforced here in the core so it covers every entry point,
+	// not just `trond apply`. Returns a typed StructuredError so callers
+	// surface error_code PRIVATE_NETWORK_REQUIRED / exit 2 unchanged.
+	if opts.RequirePrivate && !intent.IsPrivate(opts.Intent.Network) {
+		return nil, output.NewError("PRIVATE_NETWORK_REQUIRED", output.ExitValidationError,
+			fmt.Sprintf("--require-private set but intent network is %q (not private); refusing to apply", opts.Intent.Network))
+	}
+
 	start := time.Now()
 	node := &opts.Intent.Nodes[0]
 
@@ -290,6 +312,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		IntentHash: opts.IntentHash,
 		ConfigHash: configHash,
 		Version:    node.Version,
+		Network:    opts.Intent.Network,
 		Target: state.NodeTarget{
 			Type:         opts.Intent.Target.Type,
 			Host:         opts.Intent.Target.Host,
@@ -327,6 +350,8 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		ConfigHash: configHash,
 		Version:    node.Version,
 		Runtime:    runtimeType,
+		Network:    opts.Intent.Network,
+		IsPrivate:  intent.IsPrivate(opts.Intent.Network),
 		Endpoints: map[string]string{
 			"http": fmt.Sprintf("http://127.0.0.1:%d", node.Ports.HTTP),
 			"grpc": fmt.Sprintf("127.0.0.1:%d", node.Ports.GRPC),
@@ -443,6 +468,18 @@ func validateOptions(o Options) error {
 // before invoking — the helper itself trusts the contract to keep
 // the body straight-line.
 func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *Result {
+	// Backfill the network on legacy state. A node deployed before
+	// ManagedNode.Network existed has it empty; on a no-op re-apply we
+	// learn it from the intent, so persist it — otherwise the no_change
+	// Result would report network/is_private from the intent while a
+	// follow-up `status` (which reads state) still showed it absent.
+	// Best-effort: a save failure here doesn't fail the no-op.
+	if opts.Existing != nil && opts.Existing.Network != opts.Intent.Network && opts.Store != nil && opts.State != nil {
+		opts.Existing.Network = opts.Intent.Network
+		opts.Store.UpsertNode(opts.State, *opts.Existing)
+		_ = opts.Store.Save(opts.State)
+	}
+
 	ports := opts.Intent.Nodes[0].Ports
 	return &Result{
 		Name:       opts.Intent.Name,
@@ -451,6 +488,8 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 		ConfigHash: opts.Existing.ConfigHash,
 		Version:    opts.Existing.Version,
 		Runtime:    opts.Existing.Runtime,
+		Network:    opts.Intent.Network,
+		IsPrivate:  intent.IsPrivate(opts.Intent.Network),
 		Endpoints: map[string]string{
 			"http": fmt.Sprintf("http://127.0.0.1:%d", ports.HTTP),
 			"grpc": fmt.Sprintf("127.0.0.1:%d", ports.GRPC),

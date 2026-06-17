@@ -95,6 +95,14 @@
       ],
       "description": "Which runtime was selected based on intent.target.runtime."
     },
+    "network": {
+      "type": "string",
+      "description": "The intent's network that was deployed (mainnet | nile | private)."
+    },
+    "is_private": {
+      "type": "boolean",
+      "description": "True when network is 'private' — a self-contained chain safe for an unattended agent to mutate. The same fact status returns; lets a caller confirm the rig is private without a second call."
+    },
     "build": {
       "type": "object",
       "description": "Populated when the intent carried a `build:` block (spec/002). Slice of the full build.Result manifest with the fields a caller most often needs inline. The complete manifest stays under ~/.trond/builds/manifest/<cache_key>.json.",

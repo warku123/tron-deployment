@@ -276,6 +276,15 @@ func TestApply_FullFlow_RecordsBuildCacheKey(t *testing.T) {
 		t.Errorf("Outcome = %q; want created", res.Outcome)
 	}
 
+	// C1: the result echoes the deployed network + safety fact, and a
+	// nile node is NOT private.
+	if res.Network != "nile" {
+		t.Errorf("Result.Network = %q; want nile", res.Network)
+	}
+	if res.IsPrivate {
+		t.Error("Result.IsPrivate = true for a nile node; want false")
+	}
+
 	// State persistence: ManagedNode.BuildCacheKey must equal what
 	// Result.Build.CacheKey reports — Phase 5 prune relies on this.
 	stored, err := store.Load()

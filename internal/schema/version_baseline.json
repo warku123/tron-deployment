@@ -1,9 +1,9 @@
 {
-  "schema_version": "1.7.0",
+  "schema_version": "1.8.0",
   "entries": [
     {
       "name": "apply",
-      "hash": "465432f433c2358e1d2864e1fc75e68345a6926d06219ec6ef68a20df4abb11a"
+      "hash": "130a8b784a5f3d288b0c6cced8746be52434ffb9de40a8915a3e65ba2695d156"
     },
     {
       "name": "auto-heal",
@@ -115,7 +115,7 @@
     },
     {
       "name": "status",
-      "hash": "0c8d3bf948714d420a1c939438746d58658f80136523c290dc2d7e28861ead4b"
+      "hash": "c589ec747498ce2ed52f701c80d26151cf1746757d4c05a0f24d9e54b6b96e00"
     },
     {
       "name": "verify",
