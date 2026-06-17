@@ -107,20 +107,37 @@ func statusForNode(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*
 		"labels":       node.Labels,
 		"network":      node.Network,
 		"is_private":   intent.IsPrivate(node.Network),
+		// A1 parity with `trond status -o json`: healthy seeded false
+		// (live probe flips it true), logs is the runtime-discriminated
+		// log locator for an external consumer.
+		"healthy": false,
+		"logs":    apply.LogsDescriptor(node),
 	}
-	// Live probe — best effort, only when state says the node is
-	// running. We resolve a target via the node's stored target spec
-	// (state.NodeTarget → target.Target) and hand it to apply.LiveStatus.
-	// Errors during probe are silently dropped; the caller sees
-	// block_height / is_synced / peer_count appear or not.
-	if node.Status == "running" {
+	// Live probe + container_id — best effort, resolving the target at most
+	// once. We must not open an SSH connection just to read container_id
+	// from a stopped remote node (mcpResolveTargetFromNode.Connect() isn't
+	// bound by the probe context), so we only resolve when the node is
+	// running (the probe needs a target anyway) or it's a LOCAL docker node
+	// (cheap). An ssh docker node still gets container_id, but only
+	// piggybacked on the running-node resolution. Errors are dropped.
+	needLocalDockerID := node.Runtime == "docker" && node.Target.Type == "local"
+	if node.Status == "running" || needLocalDockerID {
 		if tgt, err := mcpResolveTargetFromNode(node); err == nil {
 			if c, ok := any(tgt).(interface{ Close() error }); ok {
 				defer c.Close()
 			}
-			probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			defer cancel()
-			maps.Copy(out, apply.LiveStatus(probeCtx, tgt, node))
+			// Probe first with its own budget so a slow container_id lookup
+			// can't starve the primary `healthy` signal.
+			if node.Status == "running" {
+				pctx, pcancel := context.WithTimeout(ctx, 3*time.Second)
+				maps.Copy(out, apply.LiveStatus(pctx, tgt, node))
+				pcancel()
+			}
+			cctx, ccancel := context.WithTimeout(ctx, 3*time.Second)
+			if id := apply.ContainerID(cctx, tgt, node); id != "" {
+				out["container_id"] = id
+			}
+			ccancel()
 		}
 	}
 	return jsonResult(out)
@@ -158,6 +175,11 @@ func inspectAllNodes(ctx context.Context, _ *mcp.CallToolRequest, _ emptyArgs) (
 			"runtime":    n.Runtime,
 			"network":    n.Network,
 			"is_private": intent.IsPrivate(n.Network),
+			// logs is static (no docker call), so it's safe to include in
+			// the deliberately-static MCP inspect. container_id is omitted
+			// here (it needs a live docker query) — callers wanting it use
+			// the `status` tool, which already resolves a target.
+			"logs": apply.LogsDescriptor(&n),
 		}
 		// Endpoints: we have HTTPPort/GRPCPort persisted in state from
 		// apply; cmd/inspect.go's enrichment with container_ip

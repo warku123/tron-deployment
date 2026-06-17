@@ -23,6 +23,26 @@ up cold.
 - **Depends on / blocked by:** `internal/fsclone` primitive landing (this PR);
   a concrete second consumer (e.g. an agent warm-pool flow or `apply --snapshot`).
 
+## Emit `chain_id` in `status` / `inspect` -o json
+
+- **What:** The ai-ops A1 ask lists `chain_id` in the per-node `status
+  --json` shape. The 2026-06 A1 increment shipped `healthy`,
+  `container_id`, and the `logs` locator but deferred `chain_id`.
+- **Why deferred:** TRON has no single cheap RPC that returns a tidy chain
+  id. It's derived from the genesis block (the genesis block ID / its
+  trailing bytes), so producing it means a `/wallet/getblockbynum?num=0`
+  probe + a documented derivation — more than the additive-field A1 scope.
+  The operational A1 definition ("expose rpc_endpoint + node-log paths")
+  does not require it; tron-toolkit/mcp-logs are unblocked without it.
+- **How to add:** in `internal/apply` add a best-effort probe that fetches
+  block 0 and derives the chain id (match java-tron's
+  `Wallet.getChainId()` / the genesis block-id convention), surface it in
+  `LiveStatus` or a sibling, wire into status/inspect + schemas, bump
+  SchemaVersion (additive → MINOR per the C1/A1 precedent).
+- **Context:** flagged while implementing A1 (2026-06). For a private net
+  the value is deterministic from the genesis the intent pins, so it
+  doubles as a B1 "echo the resolved rig identity" signal.
+
 ## Rename `network-create`'s `network` output field
 
 - **What:** `network create -o json` returns `network` = the network's intent

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tronprotocol/tron-deployment/internal/state"
@@ -52,11 +53,23 @@ func LiveStatus(ctx context.Context, tgt target.Target, node *state.ManagedNode)
 			} `json:"block_header"`
 		}
 		if json.Unmarshal(data, &block) == nil {
-			out["block_height"] = block.BlockHeader.RawData.Number
-			if block.BlockHeader.RawData.Timestamp > 0 {
+			ts := block.BlockHeader.RawData.Timestamp
+			// Gate `healthy` on a real block, not just parseable JSON. An
+			// empty body `{}` or an error-shaped 200 (`{"Error":"..."}`)
+			// unmarshals cleanly into the zero value — number 0, timestamp
+			// 0 — and must NOT read as healthy. Every genuine getnowblock
+			// (including a private-net genesis) carries a non-zero block
+			// timestamp, so ts>0 is the integrity check that the node
+			// actually served a block. healthy is liveness only ("RPC is
+			// serving blocks"), NOT a sync guarantee — is_synced/block_height
+			// carry that. Only ever set true here; callers seed false so the
+			// field is always present and fail-safe.
+			if ts > 0 {
+				out["block_height"] = block.BlockHeader.RawData.Number
+				out["healthy"] = true
 				// "synced" heuristic: tip within 60s of now. Good enough
 				// for dashboards; not a consensus-level claim.
-				lag := time.Since(time.UnixMilli(block.BlockHeader.RawData.Timestamp))
+				lag := time.Since(time.UnixMilli(ts))
 				out["is_synced"] = lag < 60*time.Second
 			}
 		}
@@ -72,4 +85,76 @@ func LiveStatus(ctx context.Context, tgt target.Target, node *state.ManagedNode)
 	}
 
 	return out
+}
+
+// ContainerID returns the full 64-hex docker container ID for a node, or
+// "" when the node isn't a docker node, the daemon can't be reached, or
+// no container exists yet. Best-effort: callers treat "" as unknown and
+// omit the field rather than surface a probe error. Works for both local
+// and ssh targets via tgt.Exec. An agent uses this to attach/exec against
+// the exact container backing the rig (A1: container_id).
+func ContainerID(ctx context.Context, tgt target.Target, node *state.ManagedNode) string {
+	if tgt == nil || node == nil || node.Runtime != "docker" {
+		return ""
+	}
+	out, err := tgt.Exec(ctx, "docker", "inspect", "-f", "{{.Id}}", node.Name)
+	if err != nil {
+		return ""
+	}
+	return NormalizeContainerID(string(out))
+}
+
+// NormalizeContainerID trims and validates raw `docker inspect -f {{.Id}}`
+// output, returning the clean 64-hex container ID or "" if the input isn't
+// exactly 64 lowercase hex chars. docker prints error text (or nothing) to
+// stdout in some states, so this rejects anything malformed. Single source
+// of truth shared by apply.ContainerID (target.Exec → []byte) and cmd's
+// dockerContainerID (localDockerExec → string) so the format rule can't
+// drift between the two call sites.
+func NormalizeContainerID(s string) string {
+	id := strings.TrimSpace(s)
+	if len(id) != 64 || strings.TrimLeft(id, "0123456789abcdef") != "" {
+		return ""
+	}
+	return id
+}
+
+// LogsDescriptor returns a machine-readable locator telling an external
+// log consumer (e.g. mcp-logs) exactly how to read this node's logs
+// without screen-scraping. The shape is runtime-discriminated because the
+// retrieval mechanism genuinely differs — a single "log_path" string would
+// be wrong for half the runtimes:
+//
+//   - docker: java-tron logs to a file INSIDE the container
+//     (/java-tron/logs/tron.log); read it via `docker exec <container>`.
+//   - jar: the systemd unit's output lands in the journal; read it via
+//     `journalctl -u <unit>`.
+//
+// Static (no I/O) and always present, so a caller can plan retrieval even
+// for a stopped node (A1: node-log paths — the mcp-logs unblocker).
+func LogsDescriptor(node *state.ManagedNode) map[string]any {
+	if node == nil {
+		return nil
+	}
+	switch node.Runtime {
+	case "jar":
+		return map[string]any{
+			"runtime": "jar",
+			"unit":    fmt.Sprintf("tron-%s.service", node.Name),
+		}
+	case "docker":
+		return map[string]any{
+			"runtime":   "docker",
+			"container": node.Name,
+			"path":      "/java-tron/logs/tron.log",
+		}
+	default:
+		// Unknown/unrecorded runtime (e.g. a legacy node from before the
+		// field was stored, or a future runtime). Don't assert a concrete
+		// locator we can't stand behind — mislabeling such a node as
+		// "docker" would point a log consumer at a container path that
+		// doesn't exist. Report the runtime honestly so the caller sees it
+		// can't act on this descriptor.
+		return map[string]any{"runtime": node.Runtime}
+	}
 }

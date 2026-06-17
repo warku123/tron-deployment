@@ -81,19 +81,56 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		// then false (fail-safe — an agent treats "unknown" as not-safe).
 		"network":    node.Network,
 		"is_private": intent.IsPrivate(node.Network),
+		// healthy is the single boolean an agent gates on for "is this
+		// node answering RPC". Seeded false so the field is always present
+		// and fail-safe; the live probe flips it true only on a parseable
+		// getnowblock. logs tells an external consumer (mcp-logs) how to
+		// read this node's logs without screen-scraping. Both are A1.
+		"healthy": false,
+		"logs":    apply.LogsDescriptor(node),
 		"api_endpoints": map[string]any{
 			"http": fmt.Sprintf("http://127.0.0.1:%d", effectivePort(node.HTTPPort, 8090)),
 			"grpc": fmt.Sprintf("127.0.0.1:%d", effectivePort(node.GRPCPort, 50051)),
 		},
 	}
 
-	// Live probe — best effort, 3s timeout. We skip if the node isn't
-	// running per state, since calling curl against a stopped node is
-	// just noise.
-	if node.Status == "running" {
-		ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
-		defer cancel()
-		maps.Copy(statusInfo, liveStatusProbe(ctx, node))
+	// Resolve the target at most once, and only when we actually need it.
+	// Resolving is cheap for a local target but opens an SSH connection for
+	// an ssh one — and SSHTarget.Connect() is NOT bound by the 3s context
+	// below — so we must never resolve just to fetch container_id from a
+	// stopped remote node (that would turn an instant `status` into a
+	// blocking SSH dial). We resolve when:
+	//   - the node is running (the live probe needs a target regardless), or
+	//   - it's a LOCAL docker node (cheap; lets us read container_id even
+	//     when stopped — a stopped container still has an ID).
+	// An ssh docker node still gets container_id, but only piggybacked on
+	// the running-node probe resolution — never via a fresh dial for a
+	// stopped node. Best-effort throughout: failure just omits the fields.
+	needLocalDockerID := node.Runtime == "docker" && node.Target.Type == "local"
+	if node.Status == "running" || needLocalDockerID {
+		if tgt, err := resolveTargetFromNode(node); err == nil {
+			if c, ok := any(tgt).(interface{ Close() error }); ok {
+				defer c.Close()
+			}
+			// Live probe FIRST and with its own 3s budget: `healthy` is the
+			// primary signal, and it must not be starved by a slow
+			// `docker inspect` for the optional container_id. Each call gets
+			// an independent deadline off the command context.
+			if node.Status == "running" {
+				pctx, pcancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+				maps.Copy(statusInfo, apply.LiveStatus(pctx, tgt, node))
+				pcancel()
+			}
+			// container_id (optional metadata) lets an agent attach/exec
+			// against the exact container. ContainerID no-ops for non-docker
+			// nodes, so it's safe to call unconditionally on the resolved
+			// target.
+			cctx, ccancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+			if id := apply.ContainerID(cctx, tgt, node); id != "" {
+				statusInfo["container_id"] = id
+			}
+			ccancel()
+		}
 	}
 
 	if node.Monitoring != nil && node.Monitoring.Enabled {
@@ -123,6 +160,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if syn, ok := statusInfo["is_synced"].(bool); ok {
 		fmt.Printf("Synced:       %v\n", syn)
 	}
+	if h, ok := statusInfo["healthy"].(bool); ok {
+		fmt.Printf("Healthy:      %v\n", h)
+	}
+	if id, ok := statusInfo["container_id"].(string); ok && id != "" {
+		fmt.Printf("Container:    %s\n", id[:12])
+	}
 
 	// Show monitoring stack health if deployed.
 	if node.Monitoring != nil && node.Monitoring.Enabled {
@@ -139,20 +182,6 @@ func effectivePort(stored, fallback int) int {
 		return stored
 	}
 	return fallback
-}
-
-// liveStatusProbe wraps the package-level apply.LiveStatus so cmd/
-// callers don't have to think about target resolution. The actual
-// probe logic lives in internal/apply for reuse by MCP / recipe.
-func liveStatusProbe(ctx context.Context, node *state.ManagedNode) map[string]any {
-	tgt, err := resolveTargetFromNode(node)
-	if err != nil {
-		return map[string]any{}
-	}
-	if c, ok := any(tgt).(interface{ Close() error }); ok {
-		defer c.Close()
-	}
-	return apply.LiveStatus(ctx, tgt, node)
 }
 
 // probeMonitoringStatus returns a short health status string for the
