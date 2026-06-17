@@ -215,7 +215,17 @@ OPENSSL_LDFLAGS ?= $(shell pkg-config --libs  openssl 2>/dev/null || echo -L/usr
 ##              Requires liboqs ≥ 0.10 installed (brew install liboqs on macOS).
 ##              Uses CGO + liboqs C library; produces a larger binary that can
 ##              sign FN_DSA_512 PQ transactions in addition to ML_DSA_44.
+##              Skipped with a warning (exit 0) when liboqs is not installed,
+##              so CI runners without liboqs do not fail.
 build-txgen-falcon: $(GO_BOOTSTRAP)
+	@if ! (pkg-config --exists liboqs 2>/dev/null || \
+	       [ -f /usr/local/include/oqs/oqs.h ] || \
+	       [ -f /opt/homebrew/include/oqs/oqs.h ]); then \
+		echo "⚠  liboqs not found — skipping build-txgen-falcon"; \
+		echo "   Install with: brew install liboqs  (macOS)"; \
+		echo "   or build from source: https://github.com/open-quantum-safe/liboqs"; \
+		exit 0; \
+	fi
 	@mkdir -p bin
 	CGO_ENABLED=1 \
 	CGO_CFLAGS="$(LIBOQS_CFLAGS)" \
