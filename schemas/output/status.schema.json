@@ -57,6 +57,16 @@
       "type": "boolean",
       "description": "True when network is 'private' — a self-contained chain safe for an unattended agent to mutate. Lets an automated caller PROVE a rig is private before acting. False when network is empty/unknown (fail-safe)."
     },
+    "build_cache_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}-b[0-9a-f]{8}(\\+dirty-[0-9a-f]{8})?(-x[0-9a-f]{8})?$",
+      "description": "Content-addressed cache key of the source build that produced this node's artifact (`<gitrev:12>-b<digest>[+dirty-...][-x...]`). Present only when the node was built from source (intent build: block); absent for pre-built image/jar nodes."
+    },
+    "build_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$",
+      "description": "Resolved source git revision (short, 12-hex) the node was built from — the leading segment of build_cache_key, surfaced separately so an agent knows which java-tron commit is running without parsing the compound key. Present only for source-built nodes."
+    },
     "healthy": {
       "type": "boolean",
       "description": "Liveness only: true when status=running AND the live getnowblock probe returned a REAL block (non-zero block timestamp — an empty or error-shaped 200 does not count). It means 'the RPC is serving blocks', NOT that the node is fully synced — use is_synced and block_height for sync health (healthy can be true while is_synced is false on a node whose tip is stale). False when stopped, unreachable, or the probe was skipped (fail-safe). Always present."

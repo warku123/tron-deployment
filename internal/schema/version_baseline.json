@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.11.0",
+  "schema_version": "1.12.0",
   "entries": [
     {
       "name": "apply",
@@ -59,11 +59,11 @@
     },
     {
       "name": "inspect",
-      "hash": "98903914b1f632a16f719576afbd39e98c43cce5b41139451ea8665de191512f"
+      "hash": "edd4971f93c5810ca6e42969a48ee7a13a256e51ed36d88b8b1bbaa0e2148046"
     },
     {
       "name": "list",
-      "hash": "180fd09cefb57c2c511e3b6157ed2cf2238307836ed03dc529b395f725230764"
+      "hash": "0d13e578d62cd50cff0f520ef3ed4325b181eeb96dd3b9965d4faf8d2d1418dc"
     },
     {
       "name": "network-create",
@@ -119,7 +119,7 @@
     },
     {
       "name": "status",
-      "hash": "d10f5c4ab65e7fa711d5fd4a725db82b5b8717f568b2e41431cebede4c629223"
+      "hash": "3eb693e6f168eace4bd2720913690a5c88482b2d249cf4b958cd62386f2119ba"
     },
     {
       "name": "verify",

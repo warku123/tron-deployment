@@ -184,6 +184,15 @@ func manifestForNode(ctx context.Context, n *state.ManagedNode) map[string]any {
 		"logs": apply.LogsDescriptor(n),
 	}
 
+	// Build identity (B1): cache key + resolved git revision for
+	// source-built nodes, so an agent knows which commit is running.
+	if n.BuildCacheKey != "" {
+		entry["build_cache_key"] = n.BuildCacheKey
+		if rev := n.BuildRevision(); rev != "" {
+			entry["build_revision"] = rev
+		}
+	}
+
 	// Best-effort container IP + ID for docker nodes — only attempted if
 	// the node is local; SSH inspect would need a remote docker call which
 	// pulls in target resolution. The test harness usually runs on the

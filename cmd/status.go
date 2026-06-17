@@ -94,6 +94,17 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		},
 	}
 
+	// Build identity (B1): when the node was built from source, surface the
+	// content-addressed cache key AND the resolved git revision, so an agent
+	// knows exactly which java-tron commit is running without assuming.
+	// Omitted entirely for nodes that consumed a pre-built image/jar.
+	if node.BuildCacheKey != "" {
+		statusInfo["build_cache_key"] = node.BuildCacheKey
+		if rev := node.BuildRevision(); rev != "" {
+			statusInfo["build_revision"] = rev
+		}
+	}
+
 	// Resolve the target at most once, and only when we actually need it.
 	// Resolving is cheap for a local target but opens an SSH connection for
 	// an ssh one — and SSHTarget.Connect() is NOT bound by the 3s context
