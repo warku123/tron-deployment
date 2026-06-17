@@ -301,6 +301,16 @@ func resolveBuild(ctx context.Context, req Request) (*resolved, error) {
 
 	src := Source{Path: req.SourcePath, RevisionSpec: req.RevisionSpec}
 	if err := src.Resolve(ctx); err != nil {
+		// A cancelled context kills the git sub-process (rev-parse / dirty
+		// detection) mid-flight, surfacing as a raw git error rather than a
+		// cancellation. That IS a cancelled build, not an invalid source —
+		// report it as such (matches the cancellation handling below and
+		// the FR-016 contract). Without this, cancelling during source
+		// resolution races: fast git → cancel lands later (reported
+		// cancelled), slow git → cancel kills git (reported INVALID_SOURCE).
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, output.NewErrorf("BUILD_CANCELLED", 130, "build cancelled by user")
+		}
 		return nil, output.NewErrorf("INVALID_SOURCE", output.ExitValidationError,
 			"resolve source: %s", err.Error()).
 			WithSuggestions(
