@@ -69,7 +69,11 @@ import (
 //	        container_id + node-log paths) so external read-only tools
 //	        (tron-toolkit, mcp-logs) can attach with zero new code.
 //	        Additive optional fields.
-const SchemaVersion = "1.9.0"
+//	1.10.0 — add snapshot-clone schema (new `trond snapshot clone <src>
+//	        <dst>` command — copy-on-write clone of a chain-DB dir into a
+//	        fresh path for warm-pool fixtures, ai-ops B3). Existing schemas
+//	        unchanged.
+const SchemaVersion = "1.10.0"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tronprotocol/tron-deployment/blob/master/schemas/output/snapshot-clone.schema.json",
+  "title": "trond snapshot clone output",
+  "description": "Returned by `trond snapshot clone <src> <dst> -o json`. Reports the outcome of a copy-on-write clone of a chain-DB directory into a fresh path.",
+  "type": "object",
+  "required": ["source", "dest", "method"],
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "The source directory that was cloned (verbatim)."
+    },
+    "dest": {
+      "type": "string",
+      "description": "The newly created destination directory."
+    },
+    "method": {
+      "type": "string",
+      "enum": ["clonefile", "ficlone", "copy"],
+      "description": "How the tree was materialised. clonefile (APFS, macOS) and ficlone (Linux FICLONE) are copy-on-write — instant, sharing extents with the source, near-zero extra disk. copy means CoW was unavailable (source and destination on different filesystems, or a filesystem without CoW support) and a full byte copy was made — slow and consuming full disk; a warning is also printed to stderr."
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Clone wall-clock time in milliseconds."
+    }
+  },
+  "additionalProperties": false
+}

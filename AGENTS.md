@@ -271,6 +271,29 @@ trond snapshot prune                      # default policy
 trond snapshot prune --all -o json        # ignore age, return JSON
 ```
 
+### Warm pool — `trond snapshot clone`
+
+Once you have a chain DB on disk (a downloaded snapshot, or a STOPPED
+node's data dir), fork it into isolated fixtures in seconds instead of
+re-downloading 30-90GB:
+
+```bash
+trond snapshot clone ./output-directory ./rig-a/output-directory -o json
+# → {"source":"...","dest":"...","method":"clonefile","duration_ms":3}
+```
+
+`method` is `clonefile` (macOS APFS) or `ficlone` (Linux btrfs/xfs) for a
+copy-on-write clone — instant, sharing extents, near-zero extra disk. It is
+`copy` when source and dest are on different filesystems (or a non-CoW FS):
+a full byte copy is made (slow, full disk) and a warning prints to stderr,
+so keep the clone target on the SAME filesystem as the source for the fast
+path. `<dst>` must not already exist (clone refuses rather than overwrite),
+and the source must be **quiescent** — stop a node before cloning its live
+DB, or the point-in-time view is undefined. Cross-FS clones get a
+free-space preflight (refused with `DISK_SPACE_ERROR` if the copy won't
+fit). CLI-only (not an MCP tool): it mutates the filesystem, so it stays
+out of the read-only agent fleet.
+
 The intent needs `storage.data: /srv/tron/<node>/output-directory` so
 the bind mount lines up with where the tarball extracts. See
 `examples/mainnet-fullnode-snapshot.yaml`.

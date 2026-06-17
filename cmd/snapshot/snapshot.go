@@ -33,4 +33,5 @@ func init() {
 	Cmd.AddCommand(logsCmd)
 	Cmd.AddCommand(stopCmd)
 	Cmd.AddCommand(pruneCmd)
+	Cmd.AddCommand(cloneCmd)
 }
