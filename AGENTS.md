@@ -617,19 +617,30 @@ An automated caller that should only ever touch a throwaway private chain
   TODO; standard private rigs use the private template, which ships no
   real seeds.)
 
-- **Enforce at deploy.** `apply --require-private` and
-  `network create --require-private` refuse any non-private intent up
-  front (error_code `PRIVATE_NETWORK_REQUIRED`, exit 2). The guard lives
-  in `apply.Apply()` core, so every deploy path inherits it. Pure opt-in —
-  default behaviour and mainnet deploys are unchanged. Pass it from a
-  sandboxed skill so the deploy is *mechanically* incapable of hitting
-  shared infra, instead of trusting a standing rule.
+- **Enforce on every mutation.** `--require-private` is a **persistent
+  flag** (works on any command) plus the **`TROND_REQUIRE_PRIVATE`** env
+  var. When set, every mutating verb refuses a non-private node up front
+  with `PRIVATE_NETWORK_REQUIRED` (exit 2): `apply`, `network create`, and
+  the per-node mutators `start` / `stop` / `restart` / `remove` /
+  `rollback` / `upgrade`. The MCP `apply` tool takes the same gate via a
+  `require_private` argument. Export `TROND_REQUIRE_PRIVATE=1` once at
+  session start and an unattended agent is *mechanically* incapable of
+  mutating a mainnet/nile rig — no per-call discipline, instead of trusting
+  a standing rule.
+- **It's a one-way floor, not a fallback.** The flag OR a truthy env turns
+  the gate on; once on it cannot be turned off for the invocation
+  (`--require-private=false` cannot override a truthy env). Pure opt-in —
+  default behaviour and mainnet deploys are unchanged when neither is set.
+- The guard checks the node's RECORDED network from state, using state
+  ONLY (before any SSH/target work), so an unreachable mainnet node still
+  refuses with `PRIVATE_NETWORK_REQUIRED` rather than `TARGET_UNREACHABLE`.
+  A node with no recorded network (deployed before network tracking) is
+  fail-safe-refused with a re-apply hint.
 
 The read-only verbs (`status`, `wait`, `inspect`, `list`, `diagnose`)
-never mutate; only `apply` / `remove` / `start|stop|restart` do — gate
-the mutating ones behind the `is_private` check. (`--require-private`
-currently enforces on `apply` + `network create`; the rarer mutators
-gate via the `is_private` query for now.)
+never mutate and are always safe. The multi-node mutators (chaos
+`disconnect`/`partition`, `network add`/`destroy`/`upgrade`) are not yet
+gated — a tracked TODO; gate them via the `is_private` query meanwhile.
 
 > ⚠️ **`network` means two things across commands.** In `apply` / `status`
 > / `list` / `inspect` it is the chain kind (`mainnet|nile|private`,

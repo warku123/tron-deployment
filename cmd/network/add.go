@@ -176,6 +176,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	store.UpsertNode(deployState, state.ManagedNode{
 		Name:    nodeName,
 		Version: node.Version,
+		// Record the network kind (mainnet|nile|private) so the C1
+		// is_private fact and the --require-private guard work for added
+		// nodes too — without this they'd read as legacy/unknown and a
+		// private-net node would be fail-safe-refused by every mutator.
+		Network: parsed.Network,
 		// Persist the FULL target so subsequent stop/start/files/inspect
 		// can rebuild the SSH connection. Earlier this only stored
 		// Type, leaving Host/User/Port/IdentityFile blank — which then

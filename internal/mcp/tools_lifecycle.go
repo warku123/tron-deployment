@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tronprotocol/tron-deployment/internal/apply"
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
@@ -85,9 +87,10 @@ func planTool(ctx context.Context, _ *mcp.CallToolRequest, args planArg) (*mcp.C
 }
 
 type applyArgs struct {
-	Path        string `json:"path" jsonschema:"absolute path to an intent.yaml file"`
-	AutoApprove bool   `json:"auto_approve,omitempty" jsonschema:"required to apply changes to an already-deployed node; otherwise the call returns HUMAN_REQUIRED"`
-	Wait        bool   `json:"wait,omitempty" jsonschema:"block until the node's HTTP API responds"`
+	Path           string `json:"path" jsonschema:"absolute path to an intent.yaml file"`
+	AutoApprove    bool   `json:"auto_approve,omitempty" jsonschema:"required to apply changes to an already-deployed node; otherwise the call returns HUMAN_REQUIRED"`
+	Wait           bool   `json:"wait,omitempty" jsonschema:"block until the node's HTTP API responds"`
+	RequirePrivate bool   `json:"require_private,omitempty" jsonschema:"refuse to apply unless the intent's network is private; returns PRIVATE_NETWORK_REQUIRED otherwise (the C1 safety gate, also forced on by the TROND_REQUIRE_PRIVATE env)"`
 }
 
 func applyTool(ctx context.Context, _ *mcp.CallToolRequest, args applyArgs) (*mcp.CallToolResult, any, error) {
@@ -98,6 +101,15 @@ func applyTool(ctx context.Context, _ *mcp.CallToolRequest, args applyArgs) (*mc
 	parsed, err := intent.Load(args.Path)
 	if err != nil {
 		return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error()))
+	}
+
+	// --require-private (early gate, precedence): refuse a non-private intent
+	// BEFORE target resolution and the HUMAN_REQUIRED change gate, so the
+	// agent gets PRIVATE_NETWORK_REQUIRED (exit 2) rather than
+	// TARGET_UNREACHABLE or HUMAN_REQUIRED masking it. Honors the tool arg
+	// OR the TROND_REQUIRE_PRIVATE env floor.
+	if err := guard.EnforceArg(args.RequirePrivate, parsed.Network); err != nil {
+		return errResult(err)
 	}
 
 	tgt, err := resolveTarget(parsed)
@@ -145,8 +157,17 @@ func applyTool(ctx context.Context, _ *mcp.CallToolRequest, args applyArgs) (*mc
 		EnvVars:        resolveEnvVars(&parsed.Nodes[0]),
 		Wait:           args.Wait,
 		WaitTimeout:    5 * time.Minute,
+		RequirePrivate: args.RequirePrivate || guard.Requested(),
 	})
 	if err != nil {
+		// Pass a structured error (e.g. the core PRIVATE_NETWORK_REQUIRED
+		// gate) through with its own code/exit; only opaque errors get the
+		// generic DEPLOY_ERROR wrap. Without this, threading RequirePrivate
+		// into the core would surface as DEPLOY_ERROR and lose the contract.
+		var se *output.StructuredError
+		if errors.As(err, &se) {
+			return errResult(se)
+		}
 		return errResult(output.NewError("DEPLOY_ERROR", output.ExitGeneralError, err.Error()))
 	}
 	return jsonResult(res)

@@ -73,7 +73,14 @@ import (
 //	        <dst>` command — copy-on-write clone of a chain-DB dir into a
 //	        fresh path for warm-pool fixtures, ai-ops B3). Existing schemas
 //	        unchanged.
-const SchemaVersion = "1.10.0"
+//	1.11.0 — `--require-private` becomes a PERSISTENT root flag (+ env
+//	        TROND_REQUIRE_PRIVATE) enforced on every per-node mutator
+//	        (start/stop/restart/remove/rollback/upgrade) and the MCP apply
+//	        tool, not just apply/network-create. Inherited persistent flags
+//	        are collected into the `trond schema` manifest, so the manifest
+//	        surface changes for every command (additive). The C1 safety
+//	        boundary now covers all single-node mutations.
+const SchemaVersion = "1.11.0"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

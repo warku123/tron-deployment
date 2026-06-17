@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
@@ -20,9 +21,8 @@ import (
 )
 
 var (
-	createIntentPath     string
-	createMonitor        bool
-	createRequirePrivate bool
+	createIntentPath string
+	createMonitor    bool
 )
 
 var createCmd = &cobra.Command{
@@ -35,7 +35,8 @@ var createCmd = &cobra.Command{
 func init() {
 	createCmd.Flags().StringVar(&createIntentPath, "intent", "", "Path to intent.yaml (required)")
 	createCmd.Flags().BoolVar(&createMonitor, "monitor", false, "Deploy Prometheus + Grafana monitoring stack for the network")
-	createCmd.Flags().BoolVar(&createRequirePrivate, "require-private", false, "Refuse to create the network unless its intent network is private (machine-enforced safety gate for unattended agents)")
+	// --require-private is the persistent root flag + TROND_REQUIRE_PRIVATE
+	// env, enforced via internal/guard — inherited here, no local flag.
 	if err := createCmd.MarkFlagRequired("intent"); err != nil {
 		panic(err)
 	}
@@ -51,10 +52,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	// --require-private: same machine-enforced safety gate as `apply`,
 	// applied to the multi-node path. Refuse a non-private network before
-	// deploying anything.
-	if createRequirePrivate && !intent.IsPrivate(parsed.Network) {
-		return output.NewError("PRIVATE_NETWORK_REQUIRED", output.ExitValidationError,
-			fmt.Sprintf("--require-private set but intent network is %q (not private); refusing to create", parsed.Network))
+	// deploying anything. Predicate + error live in internal/guard.
+	if err := guard.Enforce(parsed.Network); err != nil {
+		return err
 	}
 
 	// Apply monitoring defaults early so RenderHOCON can inject metrics config.

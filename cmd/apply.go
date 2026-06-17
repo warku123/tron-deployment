@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tronprotocol/tron-deployment/internal/apply"
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/state"
@@ -16,12 +17,11 @@ import (
 )
 
 var (
-	applyIntentPath     string
-	applyAutoApprove    bool
-	applyWait           bool
-	applyWaitTimeout    time.Duration
-	applyMonitor        bool
-	applyRequirePrivate bool
+	applyIntentPath  string
+	applyAutoApprove bool
+	applyWait        bool
+	applyWaitTimeout time.Duration
+	applyMonitor     bool
 )
 
 var applyCmd = &cobra.Command{
@@ -47,7 +47,9 @@ func init() {
 	applyCmd.Flags().BoolVar(&applyWait, "wait", false, "Block until the deployed node's HTTP API is reachable")
 	applyCmd.Flags().DurationVar(&applyWaitTimeout, "wait-timeout", 5*time.Minute, "Total wait budget when --wait is set")
 	applyCmd.Flags().BoolVar(&applyMonitor, "monitor", false, "Deploy monitoring stack (Prometheus + Grafana) alongside the node")
-	applyCmd.Flags().BoolVar(&applyRequirePrivate, "require-private", false, "Refuse to apply unless the intent's network is private (machine-enforced safety gate for unattended agents)")
+	// --require-private is the persistent root flag (see cmd/root.go) +
+	// TROND_REQUIRE_PRIVATE env, enforced via internal/guard — apply
+	// inherits it like every other verb, so no per-command flag here.
 	mustMarkRequired(applyCmd, "intent")
 	mustMarkRequired(applyCmd, "intent")
 	rootCmd.AddCommand(applyCmd)
@@ -68,13 +70,10 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// but we ALSO check here, first — before target resolution and the
 	// HUMAN_REQUIRED change-detection gate — so a non-private intent
 	// refuses with PRIVATE_NETWORK_REQUIRED (exit 2) rather than being
-	// masked by HUMAN_REQUIRED (exit 10). Both checks delegate to the one
-	// intent.IsPrivate predicate; this is layered defense, not divergent
-	// logic.
-	if applyRequirePrivate && !intent.IsPrivate(parsed.Network) {
-		return exitWithError("PRIVATE_NETWORK_REQUIRED", output.ExitValidationError,
-			fmt.Sprintf("--require-private set but intent network is %q (not private); refusing to apply", parsed.Network),
-			"Set network: private in the intent, or drop --require-private to allow mainnet/nile")
+	// masked by HUMAN_REQUIRED (exit 10). The predicate + error live in
+	// internal/guard (shared with every mutator); this is layered defense.
+	if err := guard.Enforce(parsed.Network); err != nil {
+		return err
 	}
 
 	// Monitoring is opt-in: only deploy when --monitor is explicitly passed.
@@ -145,7 +144,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		IntentPath:     applyIntentPath, // FR-021: relative build.source resolves vs this
 		Wait:           applyWait,
 		WaitTimeout:    applyWaitTimeout,
-		RequirePrivate: applyRequirePrivate,
+		RequirePrivate: guard.Requested(),
 	})
 	if err != nil {
 		return wrapApplyError(err)

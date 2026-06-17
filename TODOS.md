@@ -44,6 +44,25 @@ up cold.
   the value is deterministic from the genesis the intent pins, so it
   doubles as a B1 "echo the resolved rig identity" signal.
 
+## `--require-private` on the multi-node mutators (chaos + network ops)
+
+- **What:** Extend the `--require-private` / `TROND_REQUIRE_PRIVATE` gate to
+  the chaos primitives (`disconnect` / `partition` / `connect` / `heal`) and
+  the network ops (`network add` / `destroy` / `upgrade`).
+- **Why:** These mutate a rig too, so an airtight "an agent can't touch a
+  non-private net" boundary needs them. The per-node mutators
+  (start/stop/restart/remove/rollback/upgrade) + apply + network-create are
+  already gated via `internal/guard`.
+- **Cons / why deferred:** they operate on MULTIPLE nodes or a whole network,
+  so it isn't the per-node one-liner — it needs an "are ALL involved nodes
+  private?" check (chaos spans 2+ nodes; `network destroy`/`add` span the
+  network's node set). Different guard shape from the single-node path.
+- **Context:** deferred during the 2026-06-17 `/plan-eng-review` of the
+  per-node `--require-private` rollout. The shared predicate + error live in
+  `internal/guard` (`Enforce`/`EnforceArg`/`Requested`); a multi-node guard
+  would iterate the involved nodes and call `guard.Enforce` per node.
+- **Depends on / blocked by:** the per-node rollout landing (this PR).
+
 ## Rename `network-create`'s `network` output field
 
 - **What:** `network create -o json` returns `network` = the network's intent

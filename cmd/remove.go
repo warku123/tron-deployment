@@ -33,6 +33,14 @@ func init() {
 func runRemove(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
+	// --require-private precedes the destructive-confirm gate: an agent must
+	// learn "not private" (PRIVATE_NETWORK_REQUIRED, exit 2) before it is
+	// asked to confirm a destroy (HUMAN_REQUIRED, exit 10). State-only check,
+	// no target resolution.
+	if err := requirePrivateForNode(name); err != nil {
+		return err
+	}
+
 	// Require confirmation
 	if removeConfirm != name {
 		return exitWithError("HUMAN_REQUIRED", output.ExitHumanRequired,
