@@ -13,11 +13,18 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 )
 
-// TestRunApply_RequirePrivate_RefusesNonPrivate is the C1 guard test:
+// TestRunApply_RequirePrivate_RefusesNonPrivate is the C1 cmd guard test:
 // `apply --require-private` against a non-private intent must refuse with
-// a PRIVATE_NETWORK_REQUIRED / exit-2 envelope BEFORE touching the target
-// (so no docker daemon is needed — the guard returns at intent-load
-// time). A private intent must NOT trip the guard.
+// a PRIVATE_NETWORK_REQUIRED / exit-2 envelope at the early guard, BEFORE
+// touching the target (no docker needed — it returns at intent-load time).
+//
+// We deliberately only exercise the REFUSAL path here. The "private is
+// allowed" direction is covered by apply.TestApply_PrivateNetwork_ResultAndState
+// and apply.TestApply_RequirePrivate_RefusesInCore (both fakeTarget, no
+// real deploy) — driving it through runApply would actually deploy a
+// container, which under `make e2e` (docker present, default ports) would
+// squat on 8090/50051/18888 and poison the other e2e tests. (That bug is
+// exactly what this test used to cause.)
 func TestRunApply_RequirePrivate_RefusesNonPrivate(t *testing.T) {
 	// Isolate state so we never read/write the real ~/.trond.
 	paths.SetBaseDir(t.TempDir())
@@ -27,22 +34,19 @@ func TestRunApply_RequirePrivate_RefusesNonPrivate(t *testing.T) {
 	oldPath, oldReq := applyIntentPath, applyRequirePrivate
 	t.Cleanup(func() { applyIntentPath, applyRequirePrivate = oldPath, oldReq })
 
-	write := func(network string) string {
-		p := filepath.Join(t.TempDir(), "intent.yaml")
-		body := "name: guard-test\nnetwork: " + network + "\n" +
-			"target:\n  type: local\n  runtime: docker\n" +
-			"nodes:\n  - type: fullnode\n    version: latest\n"
-		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return p
+	intentPath := filepath.Join(t.TempDir(), "intent.yaml")
+	body := "name: guard-test\nnetwork: mainnet\n" +
+		"target:\n  type: local\n  runtime: docker\n" +
+		"nodes:\n  - type: fullnode\n    version: latest\n"
+	if err := os.WriteFile(intentPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
+
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
-
-	// mainnet + --require-private → refused with the right code/exit.
-	applyIntentPath = write("mainnet")
+	applyIntentPath = intentPath
 	applyRequirePrivate = true
+
 	err := runApply(cmd, nil)
 	if err == nil {
 		t.Fatal("expected refusal for mainnet + --require-private, got nil")
@@ -56,14 +60,5 @@ func TestRunApply_RequirePrivate_RefusesNonPrivate(t *testing.T) {
 	}
 	if se.ExitCode != output.ExitValidationError {
 		t.Errorf("exit_code = %d; want %d", se.ExitCode, output.ExitValidationError)
-	}
-
-	// private + --require-private → must NOT be the private-net refusal
-	// (it'll fail later at deploy without a daemon, but never with this
-	// code).
-	applyIntentPath = write("private")
-	err = runApply(cmd, nil)
-	if errors.As(err, &se) && se.Code == "PRIVATE_NETWORK_REQUIRED" {
-		t.Error("private intent wrongly refused by --require-private guard")
 	}
 }
