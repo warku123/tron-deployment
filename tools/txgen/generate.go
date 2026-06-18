@@ -55,6 +55,7 @@ func runGenerate(ctx context.Context, cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	defer signers.Close()
 
 	node := NewNodeClient(cfg.Node, 10*time.Second)
 
@@ -125,6 +126,7 @@ type signFunc func(unsigned *UnsignedTx) ([]byte, error)
 type signer struct {
 	senderHex string
 	sign      signFunc
+	close     func() // optional cleanup (e.g. liboqs native memory)
 }
 
 // signerSet selects a signer per transaction. When pqRatio is in (0,100)
@@ -145,6 +147,20 @@ func (s *signerSet) pick(roll int) *signer {
 	return s.ecdsa
 }
 
+// Close releases any native resources held by the signers (e.g. liboqs
+// OQS_SIG contexts). It is safe to call on a zero-value signerSet.
+func (s *signerSet) Close() {
+	if s == nil {
+		return
+	}
+	if s.ecdsa != nil && s.ecdsa.close != nil {
+		s.ecdsa.close()
+	}
+	if s.pq != nil && s.pq.close != nil {
+		s.pq.close()
+	}
+}
+
 // buildSigners wires up the signer(s) from config. The ECDSA signer is built
 // whenever any tx is ECDSA-signed (PQ disabled, or PQ ratio < 100); the PQ
 // signer is built when PQ is enabled.
@@ -159,6 +175,7 @@ func buildSigners(cfg *Config) (*signerSet, error) {
 			HexAddress() string
 			Base58Address() string
 			Sign(txIDHex string) ([]byte, error)
+			Close()
 		}
 
 		var ps pqSigner
@@ -190,6 +207,7 @@ func buildSigners(cfg *Config) (*signerSet, error) {
 				return AttachPQSignature(u.Raw, ps.SchemeName(),
 					ps.PublicKeyHex(), hex.EncodeToString(sig))
 			},
+			close: ps.Close,
 		}
 		log.Printf("generate: pq scheme = %s, ratio = %d%%, pq sender = %s (%s)",
 			ps.SchemeName(), set.pqRatio, ps.Base58Address(), ps.HexAddress())

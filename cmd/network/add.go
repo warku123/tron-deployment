@@ -204,6 +204,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		HTTPPort:    node.Ports.HTTP,
 		GRPCPort:    node.Ports.GRPC,
 		P2PPort:     node.Ports.P2P,
+		MetricsPort: node.Ports.Metrics,
 		InstallPath: node.InstallPath,
 		Labels:      node.Labels,
 	})
@@ -234,6 +235,17 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// metricsPort returns the Prometheus scrape port stored in state, falling
+// back to the default 9527 for nodes deployed before MetricsPort was tracked.
+// This allows network add to build correct scrape targets even when the user
+// overrides ports.metrics in the intent.
+func metricsPort(n state.ManagedNode) int {
+	if n.MetricsPort != 0 {
+		return n.MetricsPort
+	}
+	return 9527
+}
+
 // reloadNetworkMonitoring updates the Prometheus scrape config to include
 // a newly added node, then reloads Prometheus. Best-effort: failure is
 // silent (monitoring can be re-synced on next network create --monitor).
@@ -255,7 +267,7 @@ func reloadNetworkMonitoring(ctx context.Context, networkName string, deployStat
 		}
 		targets = append(targets, render.MonitoringTarget{
 			Name:    n.Name,
-			Address: fmt.Sprintf("%s:9527", n.Name),
+			Address: fmt.Sprintf("%s:%d", n.Name, metricsPort(n)),
 			Labels: map[string]string{
 				"group":    "group-tron",
 				"instance": n.Name,

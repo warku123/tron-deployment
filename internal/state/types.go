@@ -34,6 +34,10 @@ type ManagedNode struct {
 	// `network add` reads it from every existing entry to populate the new
 	// node's active_peers so it can immediately join the P2P mesh.
 	P2PPort int `json:"p2p_port,omitempty"`
+	// MetricsPort is the Prometheus scrape target port (node.metrics.prometheus.port,
+	// default 9527). Stored so network add's monitoring reload can build correct
+	// scrape targets even when the user overrides ports.metrics in the intent.
+	MetricsPort int `json:"metrics_port,omitempty"`
 	// Labels mirror intent.NodeSpec.Labels and survive across CLI sessions
 	// so test harnesses can filter via `trond list --label key=value`
 	// without touching the original intent file.

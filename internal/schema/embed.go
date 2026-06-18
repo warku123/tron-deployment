@@ -92,7 +92,13 @@ import (
 //	        MINOR were over-versioned). `chain_id` itself is deferred — it's
 //	        flag-dependent in java-tron (TVM CHAINID = full block id unless
 //	        certain VM flags are on); see TODOS.md.
-const SchemaVersion = "1.12.1"
+//	1.12.2 — inspect output gains `monitoring` (enabled +
+//	        prometheus_port + grafana_port) so agents can discover the
+//	        deployed Prometheus/Grafana stack. ManagedNode state gains
+//	        `metrics_port` so `network add` rebuilds scrape targets with
+//	        the node's real metrics port (instead of hardcoded 9527).
+//	        Additive optional fields throughout — PATCH.
+const SchemaVersion = "1.12.2"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

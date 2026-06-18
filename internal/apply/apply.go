@@ -325,6 +325,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		LastApplied: time.Now().UTC(),
 		HTTPPort:    node.Ports.HTTP,
 		GRPCPort:    node.Ports.GRPC,
+		MetricsPort: node.Ports.Metrics,
 		Labels:      node.Labels,
 		InstallPath: node.InstallPath,
 		Monitoring:  monRes.managed,

@@ -172,6 +172,9 @@ func GenerateFalconKeypair() (*FalconKeypair, error) {
 	// Strip the 0x09 serialization header: liboqs pk = 0x09 ‖ h_polynomial.
 	// BouncyCastle's FalconPublicKeyParameters(PARAMS, getH()) takes the
 	// 896-byte h polynomial without the header.
+	if pkBuf[0] != 0x09 {
+		return nil, fmt.Errorf("liboqs: unexpected Falcon public-key header 0x%02x, want 0x09", pkBuf[0])
+	}
 	hPoly := pkBuf[1:] // 896 bytes
 
 	hexAddr, b58 := addressFromPubBytes(hPoly)

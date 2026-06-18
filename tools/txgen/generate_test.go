@@ -59,6 +59,9 @@ func TestBuildSignersMixed(t *testing.T) {
 	if set.pq.senderHex == set.ecdsa.senderHex {
 		t.Fatal("pq and ecdsa senders should differ")
 	}
+	// Close must not panic and should be idempotent.
+	set.Close()
+	set.Close()
 
 	// ratio 100 → no ECDSA signer needed.
 	full, err := buildSigners(newPQConfig(100, false))
