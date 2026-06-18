@@ -643,9 +643,11 @@ An automated caller that should only ever touch a throwaway private chain
   fail-safe-refused with a re-apply hint.
 
 The read-only verbs (`status`, `wait`, `inspect`, `list`, `diagnose`)
-never mutate and are always safe. The multi-node mutators (chaos
-`disconnect`/`partition`, `network add`/`destroy`/`upgrade`) are not yet
-gated — a tracked TODO; gate them via the `is_private` query meanwhile.
+never mutate and are always safe. The multi-node mutators are now gated
+too: the chaos primitives (`disconnect`/`connect`/`partition`/`heal`) and
+`network add`/`destroy`/`upgrade` refuse unless EVERY node they touch is
+private, naming the first offender. So with `TROND_REQUIRE_PRIVATE=1` set,
+no trond verb — single-node or multi-node — will mutate a non-private rig.
 
 > ⚠️ **`network` means two things across commands.** In `apply` / `status`
 > / `list` / `inspect` it is the chain kind (`mainnet|nile|private`,

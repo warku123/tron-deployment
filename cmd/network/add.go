@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
@@ -61,6 +62,11 @@ func runAdd(cmd *cobra.Command, args []string) error {
 			"network add expects an intent with exactly one node entry")
 	}
 	node := &parsed.Nodes[0]
+
+	// --require-private: refuse to add a node on a non-private network.
+	if err := guard.Enforce(parsed.Network); err != nil {
+		return err
+	}
 
 	// Pick the next free index. Existing entries are "<network>-node<N>"; we
 	// rescan state instead of trusting any in-memory counter so the operation

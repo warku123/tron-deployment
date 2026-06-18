@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/state"
@@ -115,6 +116,22 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 			fmt.Sprintf("no nodes found for network %q", networkName)).
 			WithSuggestions("Run `trond network status` to list deployed networks",
 				"Confirm the network name matches the intent's .name field used with `network create`")
+	}
+
+	// --require-private: every node in the network must be private before we
+	// stop/upgrade/restart any of them. Gather refs for the classified set.
+	inNetwork := make(map[string]bool, len(witnesses)+len(fullnodes))
+	for _, name := range append(append([]string{}, witnesses...), fullnodes...) {
+		inNetwork[name] = true
+	}
+	var refs []guard.NodeRef
+	for _, n := range st.Nodes {
+		if inNetwork[n.Name] {
+			refs = append(refs, guard.NodeRef{Name: n.Name, Network: n.Network})
+		}
+	}
+	if err := guard.EnforceNodes(refs); err != nil {
+		return err
 	}
 
 	order := append([]string{}, fullnodes...)

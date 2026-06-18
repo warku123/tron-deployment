@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/runtime"
@@ -64,6 +65,19 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			"no network named "+destroyConfirm+" — nothing to destroy").
 			WithSuggestions("Run: trond network status",
 				"Run: trond list  (to see all managed nodes)")
+	}
+
+	// --require-private: every node in the network must be private before we
+	// tear anything down. Gathered from the same prefix match used above so
+	// the refusal happens before any node is removed.
+	var refs []guard.NodeRef
+	for _, n := range deployState.Nodes {
+		if strings.HasPrefix(n.Name, prefix) || n.Name == destroyConfirm {
+			refs = append(refs, guard.NodeRef{Name: n.Name, Network: n.Network})
+		}
+	}
+	if err := guard.EnforceNodes(refs); err != nil {
+		return err
 	}
 
 	workDir := paths.Deployments()

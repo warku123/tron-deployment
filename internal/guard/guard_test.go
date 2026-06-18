@@ -113,6 +113,30 @@ func TestEnforce(t *testing.T) {
 	}
 }
 
+func TestEnforceNodes(t *testing.T) {
+	// Gate off → allow regardless of networks.
+	setGate(t, false, "")
+	if err := EnforceNodes([]NodeRef{{"a", "mainnet"}}); err != nil {
+		t.Errorf("gate off: EnforceNodes(mainnet) = %v, want nil", err)
+	}
+
+	setGate(t, true, "")
+	if err := EnforceNodes(nil); err != nil {
+		t.Errorf("EnforceNodes(nil) = %v, want nil", err)
+	}
+	if err := EnforceNodes([]NodeRef{{"a", "private"}, {"b", "private"}}); err != nil {
+		t.Errorf("all-private = %v, want nil", err)
+	}
+	// One non-private node → refuse, naming THAT node.
+	err := EnforceNodes([]NodeRef{{"sr0", "private"}, {"sr2", "mainnet"}, {"sr3", "private"}})
+	wantPrivReq(t, err)
+	if !strings.Contains(err.Error(), "sr2") {
+		t.Errorf("error should name the offending node sr2; got %q", err.Error())
+	}
+	// Empty (unrecorded) network also refuses.
+	wantPrivReq(t, EnforceNodes([]NodeRef{{"legacy", ""}}))
+}
+
 func TestEnforceArg_ForcesWhenGlobalOff(t *testing.T) {
 	setGate(t, false, "") // global gate OFF
 	// requested=true forces enforcement for this call.
