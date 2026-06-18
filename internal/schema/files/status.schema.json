@@ -49,6 +49,11 @@
       "type": "boolean",
       "description": "True if block_height >= the network's perceived head. Derived from the same probe; absent if the probe failed."
     },
+    "genesis_block_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "The chain's identity fingerprint: the TRON block id of block 0 (64-hex), from a live getblockbynum probe. Constant for the chain's lifetime; lets an agent tell private rigs apart and correlate on-chain. NOTE: this is the TRON block id (its first 8 bytes encode the block number, 0 for genesis — not the raw header hash), and it is NOT the TVM CHAINID value (which is flag-dependent). Live-only: absent when the node is stopped/unreachable, like block_height."
+    },
     "network": {
       "type": "string",
       "description": "The network this node was deployed on (mainnet | nile | private). Empty for nodes deployed before this field was recorded."

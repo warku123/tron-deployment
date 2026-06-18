@@ -85,7 +85,14 @@ import (
 //	        `build_cache_key`. Lets an agent learn which java-tron commit a
 //	        node runs without assuming (ai-ops B1: echo the resolved SHA).
 //	        Additive optional fields, source-built nodes only.
-const SchemaVersion = "1.12.0"
+//	1.12.1 — status output gains `genesis_block_id` (the block-0 TRON block
+//	        id, the chain's identity fingerprint, from a live probe). A
+//	        single existing schema gaining one additive optional field is a
+//	        PATCH per the rule above (the earlier additive bumps that took a
+//	        MINOR were over-versioned). `chain_id` itself is deferred — it's
+//	        flag-dependent in java-tron (TVM CHAINID = full block id unless
+//	        certain VM flags are on); see TODOS.md.
+const SchemaVersion = "1.12.1"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

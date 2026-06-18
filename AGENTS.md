@@ -173,8 +173,13 @@ trond status my-fullnode -o json
   12-hex) it's running, so an agent never has to assume which commit is
   deployed. Present in `status` / `inspect -o json`; `list` carries the
   raw `build_cache_key`. Absent for pre-built image/jar nodes.
-- `chain_id` is NOT yet emitted (TRON's chain id is genesis-derived, not
-  a single cheap RPC field) — tracked in TODOS.md.
+- `genesis_block_id` (status, live-only) — the chain's identity fingerprint:
+  the block-0 TRON block id (64-hex) from a live probe. Constant for the
+  chain's lifetime; use it to tell private rigs apart and correlate
+  on-chain. Absent when the node is stopped/unreachable (like block_height).
+  This is NOT `chain_id`: TRON's TVM `CHAINID` is the full block id unless
+  certain VM flags are on (then the last 4 bytes), so a flag-aware `chain_id`
+  is still deferred — tracked in TODOS.md.
 
 **Idempotency**: `apply` is hash-gated. Same intent → no-op. Changed
 intent without `--auto-approve` → exit 10. The agent should always

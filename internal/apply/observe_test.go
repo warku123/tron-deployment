@@ -125,6 +125,65 @@ func TestLiveStatus_SetsHealthy(t *testing.T) {
 	}
 }
 
+const genesisBlockID = "0000000000000000957dc2d350daecc7bb6a38f3938ebde0a0c1cedafe15f0ed" // 64 hex, block-0 shape
+
+func TestIsHex64(t *testing.T) {
+	if !isHex64(genesisBlockID) {
+		t.Errorf("isHex64(%q) = false, want true", genesisBlockID)
+	}
+	for _, bad := range []string{"", "abc", strings.ToUpper(genesisBlockID), genesisBlockID + "0", "g" + genesisBlockID[1:]} {
+		if isHex64(bad) {
+			t.Errorf("isHex64(%q) = true, want false", bad)
+		}
+	}
+}
+
+// TestLiveStatus_GenesisBlockID covers the block-0 probe: a valid blockID
+// becomes genesis_block_id; a malformed or failed probe omits it (it's
+// optional metadata, never starving the primary signals).
+func TestLiveStatus_GenesisBlockID(t *testing.T) {
+	blockJSON := `{"block_header":{"raw_data":{"number":3,"timestamp":1}}}`
+
+	mk := func(genesisBody string, genesisErr bool) *execTarget {
+		return newExecTarget(func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			url := args[len(args)-1]
+			switch {
+			case strings.Contains(url, "/wallet/getblockbynum"):
+				if genesisErr {
+					return nil, context.DeadlineExceeded
+				}
+				return []byte(genesisBody), nil
+			case strings.Contains(url, "/wallet/getnowblock"):
+				return []byte(blockJSON), nil
+			}
+			return nil, context.DeadlineExceeded
+		})
+	}
+	node := &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: 8090}
+
+	// Valid blockID → surfaced.
+	out := LiveStatus(context.Background(), mk(`{"blockID":"`+genesisBlockID+`","block_header":{}}`, false), node)
+	if out["genesis_block_id"] != genesisBlockID {
+		t.Errorf("genesis_block_id = %v, want %s", out["genesis_block_id"], genesisBlockID)
+	}
+
+	// Malformed blockID (not 64-hex) → absent.
+	out = LiveStatus(context.Background(), mk(`{"blockID":"nope"}`, false), node)
+	if _, ok := out["genesis_block_id"]; ok {
+		t.Errorf("genesis_block_id must be absent for a malformed blockID; got %v", out["genesis_block_id"])
+	}
+
+	// Probe failed (node down) → absent, but the primary healthy signal
+	// (from getnowblock) is unaffected — proves it doesn't starve them.
+	out = LiveStatus(context.Background(), mk("", true), node)
+	if _, ok := out["genesis_block_id"]; ok {
+		t.Errorf("genesis_block_id must be absent when the probe fails; got %v", out["genesis_block_id"])
+	}
+	if out["healthy"] != true {
+		t.Errorf("a failed genesis probe must not break healthy; got %v", out["healthy"])
+	}
+}
+
 func TestLiveStatus_NoHealthyOnProbeFailure(t *testing.T) {
 	node := &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: 8090}
 	tgt := newExecTarget(func(_ context.Context, _ string, _ ...string) ([]byte, error) {

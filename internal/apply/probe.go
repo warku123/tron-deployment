@@ -35,15 +35,23 @@ func LiveStatus(ctx context.Context, tgt target.Target, node *state.ManagedNode)
 		port = 8090
 	}
 
-	probe := func(path string) ([]byte, error) {
+	// probe issues a curl against the node's HTTP API. body=="" is a GET
+	// (TRON endpoints that take no params, e.g. getnowblock); a non-empty
+	// body is POSTed as JSON (e.g. getblockbynum needs {"num":N}).
+	probe := func(path, body string) ([]byte, error) {
 		url := fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
-		if node.Runtime == "jar" {
-			return tgt.Exec(ctx, "curl", "-fsS", "--max-time", "2", url)
+		args := []string{"-fsS", "--max-time", "2"}
+		if body != "" {
+			args = append(args, "-X", "POST", "-H", "Content-Type: application/json", "-d", body)
 		}
-		return tgt.Exec(ctx, "docker", "exec", node.Name, "curl", "-fsS", "--max-time", "2", url)
+		args = append(args, url)
+		if node.Runtime == "jar" {
+			return tgt.Exec(ctx, "curl", args...)
+		}
+		return tgt.Exec(ctx, "docker", append([]string{"exec", node.Name, "curl"}, args...)...)
 	}
 
-	if data, err := probe("/wallet/getnowblock"); err == nil {
+	if data, err := probe("/wallet/getnowblock", ""); err == nil {
 		var block struct {
 			BlockHeader struct {
 				RawData struct {
@@ -75,12 +83,32 @@ func LiveStatus(ctx context.Context, tgt target.Target, node *state.ManagedNode)
 		}
 	}
 
-	if data, err := probe("/wallet/listnodes"); err == nil {
+	if data, err := probe("/wallet/listnodes", ""); err == nil {
 		var nodes struct {
 			Nodes []any `json:"nodes"`
 		}
 		if json.Unmarshal(data, &nodes) == nil {
 			out["peer_count"] = len(nodes.Nodes)
+		}
+	}
+
+	// genesis_block_id — the chain's identity fingerprint (the block-0 TRON
+	// block id). Probed LAST and treated as optional metadata: if the 3s
+	// budget is already spent on the primary signals above, this drops
+	// rather than starving healthy/block_height. The genesis never changes,
+	// so the value is stable for the node's lifetime.
+	//
+	// NB: this is the TRON *block id* (the first 8 bytes are the block
+	// number — zero for block 0 — not the raw header hash), and it is NOT
+	// the TVM CHAINID value: CHAINID returns the full id only when certain
+	// VM flags are off, the last 4 bytes when on. We deliberately expose the
+	// unambiguous full id, not a flag-dependent chain_id (see TODOS.md).
+	if data, err := probe("/wallet/getblockbynum", `{"num":0}`); err == nil {
+		var block struct {
+			BlockID string `json:"blockID"`
+		}
+		if json.Unmarshal(data, &block) == nil && isHex64(block.BlockID) {
+			out["genesis_block_id"] = block.BlockID
 		}
 	}
 
@@ -102,6 +130,13 @@ func ContainerID(ctx context.Context, tgt target.Target, node *state.ManagedNode
 		return ""
 	}
 	return NormalizeContainerID(string(out))
+}
+
+// isHex64 reports whether s is exactly 64 lowercase hex chars — the shape of
+// a TRON block id (and a docker container id). Rejects empty/error-shaped
+// responses so a malformed getblockbynum reply doesn't set genesis_block_id.
+func isHex64(s string) bool {
+	return len(s) == 64 && strings.TrimLeft(s, "0123456789abcdef") == ""
 }
 
 // NormalizeContainerID trims and validates raw `docker inspect -f {{.Id}}`
