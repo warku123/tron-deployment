@@ -46,25 +46,29 @@ up cold.
   merge.
 - **Depends on / blocked by:** nothing; both already merged.
 
-## Emit `chain_id` in `status` / `inspect` -o json
+## Emit a flag-aware `chain_id` in `status` (TVM CHAINID match)
 
-- **What:** The ai-ops A1 ask lists `chain_id` in the per-node `status
-  --json` shape. The 2026-06 A1 increment shipped `healthy`,
-  `container_id`, and the `logs` locator but deferred `chain_id`.
-- **Why deferred:** TRON has no single cheap RPC that returns a tidy chain
-  id. It's derived from the genesis block (the genesis block ID / its
-  trailing bytes), so producing it means a `/wallet/getblockbynum?num=0`
-  probe + a documented derivation — more than the additive-field A1 scope.
-  The operational A1 definition ("expose rpc_endpoint + node-log paths")
-  does not require it; tron-toolkit/mcp-logs are unblocked without it.
-- **How to add:** in `internal/apply` add a best-effort probe that fetches
-  block 0 and derives the chain id (match java-tron's
-  `Wallet.getChainId()` / the genesis block-id convention), surface it in
-  `LiveStatus` or a sibling, wire into status/inspect + schemas, bump
-  SchemaVersion (additive → MINOR per the C1/A1 precedent).
-- **Context:** flagged while implementing A1 (2026-06). For a private net
-  the value is deterministic from the genesis the intent pins, so it
-  doubles as a B1 "echo the resolved rig identity" signal.
+- **What:** `status -o json` now emits `genesis_block_id` (the block-0 TRON
+  block id — see `internal/apply/probe.go`). The original ask also wanted a
+  `chain_id` that matches what on-chain contracts see via the TVM `CHAINID`
+  opcode. That was deferred because the derivation is **flag-dependent**.
+- **The verified semantics (don't re-derive wrong):** java-tron
+  `Program.getChainId()` starts from `getBlockByNum(0).getBlockId()` and
+  returns the **full 32-byte block id**, truncating to the **last 4 bytes
+  ONLY** when `allowTvmCompatibleEvm` OR `allowOptimizedReturnValueOfChainId`
+  is active. Both are off by default on a fresh private net. So a naive
+  "last 4 bytes" `chain_id` is wrong for the default rig.
+- **How to do it right:** probe `getchainparameters` for those two flags,
+  then derive `chain_id` = full `genesis_block_id` (flags off) or its last 4
+  bytes (flags on). Ideally verify once against a deployed contract reading
+  CHAINID. Surface in `status`; bump SchemaVersion (additive → PATCH).
+- **Cons / why deferred:** marginal value (TRON tx signing uses
+  `ref_block_hash`, not a chain id; `genesis_block_id` already distinguishes
+  rigs), plus the flag-probe + verification is more than a one-field add.
+- **Context:** deferred during the 2026-06-18 `/plan-eng-review`; the
+  outside-voice (Codex, web-verified) caught the flag-dependency that would
+  have shipped a wrong `chain_id`. `genesis_block_id` shipped as the
+  unambiguous anchor.
 
 ## `--require-private` on the multi-node mutators (chaos + network ops)
 
