@@ -304,6 +304,22 @@ free-space preflight (refused with `DISK_SPACE_ERROR` if the copy won't
 fit). CLI-only (not an MCP tool): it mutates the filesystem, so it stays
 out of the read-only agent fleet.
 
+Or fork a managed node's DB by name with `--from-node` (resolves the path
+from state, so you don't hand-type it):
+
+```bash
+trond snapshot clone --from-node fn0 ./rig-a/output-directory -o json
+```
+
+`--from-node` requires the node be **stopped** and on a **local** target,
+and clones the node's chain-DB dir verbatim into `<dst>`. It works for jar
+nodes (`<install_path>/output-directory`) and docker nodes that use
+**bind-mount** storage (`storage.path` / `storage.data`). A docker node on
+the **default named volume** is refused — a named volume isn't a host path
+and can't be copy-on-write cloned; redeploy with `storage.path`, or pass an
+explicit `<src>`. ssh-target nodes are refused (the clone runs locally;
+remote-side clone is a tracked TODO).
+
 The intent needs `storage.data: /srv/tron/<node>/output-directory` so
 the bind mount lines up with where the tarball extracts. See
 `examples/mainnet-fullnode-snapshot.yaml`.
