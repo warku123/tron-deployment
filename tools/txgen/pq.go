@@ -114,3 +114,8 @@ func (s *PQSigner) HexAddress() string { return s.hexAddr }
 
 // Base58Address returns the PQ-derived TRON address ("T..." form).
 func (s *PQSigner) Base58Address() string { return s.b58Addr }
+
+// Close is a no-op for the pure-Go ML-DSA signer. It exists so PQSigner
+// satisfies the same signer interface as FalconSigner, letting generate.go
+// clean up both paths uniformly.
+func (s *PQSigner) Close() {}

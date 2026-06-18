@@ -180,6 +180,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			HTTPPort:    node.Ports.HTTP,
 			GRPCPort:    node.Ports.GRPC,
 			P2PPort:     node.Ports.P2P,
+			MetricsPort: node.Ports.Metrics,
 			Labels:      node.Labels,
 		}
 		store.UpsertNode(deployState, mn)

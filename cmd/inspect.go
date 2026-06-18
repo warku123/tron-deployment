@@ -142,6 +142,10 @@ func runInspect(cmd *cobra.Command, args []string) error {
 	if ip, ok := one["container_ip"].(string); ok && ip != "" {
 		fmt.Printf("Container IP: %s\n", ip)
 	}
+	if mon, ok := one["monitoring"].(map[string]any); ok {
+		fmt.Printf("Monitoring:   prometheus :%d, grafana :%d\n",
+			mon["prometheus_port"], mon["grafana_port"])
+	}
 	return nil
 }
 
@@ -203,6 +207,18 @@ func manifestForNode(ctx context.Context, n *state.ManagedNode) map[string]any {
 		}
 		if id := dockerContainerID(ctx, n.Name); id != "" {
 			entry["container_id"] = id
+		}
+	}
+
+	// Monitoring stack endpoints (ports only — host is always known to the
+	// caller: 127.0.0.1 for local targets, target.host for SSH). Surfacing
+	// this lets agents discover the deployed Prometheus/Grafana ports
+	// without re-parsing the apply result.
+	if n.Monitoring != nil && n.Monitoring.Enabled {
+		entry["monitoring"] = map[string]any{
+			"enabled":         true,
+			"prometheus_port": n.Monitoring.PrometheusPort,
+			"grafana_port":    n.Monitoring.GrafanaPort,
 		}
 	}
 

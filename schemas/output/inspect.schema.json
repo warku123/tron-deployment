@@ -44,7 +44,17 @@
           "labels":       { "type": "object", "additionalProperties": { "type": "string" } },
           "network":      { "type": "string" },
           "build_cache_key": { "type": "string", "description": "Content-addressed build cache key (source-built nodes only)." },
-          "build_revision":  { "type": "string", "pattern": "^[0-9a-f]{12}$", "description": "Resolved source git revision (short) the node was built from (source-built nodes only)." }
+          "build_revision":  { "type": "string", "pattern": "^[0-9a-f]{12}$", "description": "Resolved source git revision (short) the node was built from (source-built nodes only)." },
+          "monitoring": {
+            "type": "object",
+            "description": "Prometheus + Grafana stack ports for nodes deployed with --monitor. Host is implicit: 127.0.0.1 for local targets, target.host for SSH.",
+            "required": ["enabled", "prometheus_port", "grafana_port"],
+            "properties": {
+              "enabled":         { "type": "boolean" },
+              "prometheus_port": { "type": "integer", "description": "Host port the Prometheus container is bound to. 0 means Prometheus is reachable only inside the docker network (not exposed)." },
+              "grafana_port":    { "type": "integer", "description": "Host port the Grafana container is bound to." }
+            }
+          }
         }
       }
     }
