@@ -3,26 +3,26 @@
 Deferred work captured during reviews. Each item carries enough context to pick
 up cold.
 
-## `trond snapshot clone --from-node <name>` (resolve a node's DB dir)
+## `snapshot clone --from-node` for SSH-target / named-volume nodes
 
-- **What:** Add a `--from-node <name>` source to `snapshot clone` that resolves a
-  managed node's chain-DB directory from state, for BOTH docker and jar runtimes,
-  and refuses to clone unless the node is stopped.
-- **Why:** Lets an agent fork a live rig's DB by node name instead of hand-typing
-  the on-disk path.
-- **Cons / why it was deferred from B3:** the existing `destFromNode`
-  (`cmd/snapshot/download.go`) is jar-only (rejects docker) and returns
-  `install_path`, NOT the chain-DB dir — so it can't be reused as-is. Docker
-  storage paths live in render logic, not `state.json`, so this needs a new
-  runtime-aware DB-path resolver. And `fsclone.CloneDir`'s contract requires a
-  *quiescent* source, so `--from-node` must hard-refuse a running node (or stop
-  it) to avoid a corrupt point-in-time clone.
-- **Context:** Deferred during the 2026-06-17 `/plan-eng-review` of B3 (the
-  outside-voice/Codex caught that the originally-planned `--from-node` was
-  jar-only + unsafe-on-running). B3 shipped positional-paths-only
-  (`clone <src> <dst>`); this is the by-node convenience layer on top.
-- **Depends on / blocked by:** B3 (`snapshot clone`) landing first; a
-  runtime-aware DB-path resolver (docker storage path is not in state today).
+- **What:** `snapshot clone --from-node <name>` now resolves jar + docker
+  **bind-mount** nodes on a **local** target (shipped). Two cases remain
+  refused and could be supported later:
+  1. **SSH-target nodes** — `fsclone.CloneDir` is local-filesystem code
+     (`os.Stat`/`sameFilesystem`/local disk-free), so a remote node's path
+     can't be cloned locally. Supporting it needs remote-side execution (run
+     the clone over `target.Exec`, or rsync the result back).
+  2. **Docker default named-volume nodes** — the chain DB lives in
+     docker-managed storage (inside the VM on macOS), not a host path, so
+     CoW can't fire. Would need `docker cp` extraction to a host dir first (a
+     full GB-scale copy, defeating the CoW point) — dubious value.
+- **Why:** completeness for rigs that don't use local bind-mount storage.
+- **Context:** the local jar + docker-bind path shipped 2026-06-18; these two
+  were deliberately refused (with guidance) per the `/plan-eng-review`
+  (Codex caught the SSH gap — `fsclone` is local-only). The resolver +
+  `dockerInspect` seam live in `cmd/snapshot/clone.go`.
+- **Depends on / blocked by:** a remote clone primitive (for SSH); nothing for
+  the named-volume case beyond deciding `docker cp` is worth it.
 
 ## Reconcile `scripts/db_cp.sh` with `trond snapshot clone`
 
