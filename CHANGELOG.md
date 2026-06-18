@@ -34,6 +34,11 @@ The agent-ergonomics arc lands across four sequenced PRs:
     byte-copy fallback); `--from-node <name>` resolves a stopped local node's
     DB dir from state (jar + docker bind-mount).
   - (#182) Nile snapshot source URL refreshed + a weekly source-probe.
+  - (#199) `inspect -o json` surfaces the `monitoring` stack
+    (`enabled` / `prometheus_port` / `grafana_port`) for `--monitor` nodes;
+    `ManagedNode` state tracks `metrics_port` so `network add` rebuilds
+    Prometheus scrape targets with the node's real metrics port instead of a
+    hardcoded 9527. (Also bundled a txgen Falcon liboqs resource-leak fix.)
 - (#164/#165/#166) Shadow-fork release-gate fixes empirically validated
   on amd64 + qemu-arm64 EC2 (2026-05-25/26):
   - `internal/dbfork/db/leveldb.go` Close() now sweeps `.ldb → .sst`

@@ -365,6 +365,7 @@ trond network status
 | `trond network create --monitor` | Deploy a single monitoring stack for the entire network |
 | `trond network add` | Automatically reloads Prometheus config to include the new node |
 | `trond status <node>` / `trond network status` | Shows monitoring container health |
+| `trond status` / `trond inspect <node> -o json` | Expose the stack's `prometheus_port` / `grafana_port` so agents can discover it |
 | `trond remove <node>` / `trond network destroy` | Automatically cleans up the monitoring stack |
 
 After deployment, Grafana is available at http://localhost:3000 (admin/admin) with 5 dashboards: java-tron-server, java-tron-api, java-tron-api-statistic, java-tron-mechanism, and node-exporter-full. Prometheus is at http://localhost:9090.

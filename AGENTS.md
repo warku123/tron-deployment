@@ -168,6 +168,11 @@ trond status my-fullnode -o json
   the container, not stdout). `runtime=jar`: `journalctl -u <unit>`.
 - `api_endpoints.http` is the private-net RPC — point read-only on-chain
   readers (e.g. `tron-toolkit`) at it for the verify half of a loop.
+- `monitoring` (object, when deployed with `--monitor`) — the node's
+  Prometheus + Grafana stack ports (`enabled`, `prometheus_port`,
+  `grafana_port`). Present in `status` / `inspect -o json`; host is implicit
+  (127.0.0.1 local, `target.host` for ssh). Lets an agent point a metrics
+  reader at the stack without parsing the apply result.
 - `build_revision` (+ `build_cache_key`) — for a node built from source
   (intent `build:` block), the resolved java-tron git revision (short
   12-hex) it's running, so an agent never has to assume which commit is
