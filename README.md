@@ -21,6 +21,9 @@ A command-line tool for deploying, managing, and diagnosing [java-tron](https://
 - **Idempotent** -- `trond apply` is safe to run repeatedly
 - **Plan/Apply workflow** -- preview changes before deploying
 - **Structured output** -- JSON output for CI pipelines and AI agents
+- **Agent-observable state** -- `status` / `inspect` expose `healthy`, `container_id`, a runtime log locator, build revision, and `genesis_block_id` so an agent never has to screen-scrape or guess
+- **Private-net safety gate** -- `--require-private` (or the `TROND_REQUIRE_PRIVATE` env) makes trond *refuse* to mutate any non-private node; `is_private` is a queryable fact
+- **Warm-pool clones** -- `trond snapshot clone` copy-on-write clones a chain DB into an isolated fixture in seconds
 - **Built-in diagnostics** -- sync health, peer count, disk, ports, version checks
 - **Built-in monitoring** -- optional Prometheus + Grafana stack with pre-built dashboards
 - **Knowledge base** -- embedded deployment guidance and troubleshooting
@@ -274,7 +277,7 @@ cache management, and MCP usage: [build pipeline quickstart](specs/002-trond-bui
 |---|---|
 | `trond apply` | Deploy or update a node (alias: `deploy`); supports `--wait` |
 | `trond plan` | Preview changes without deploying |
-| `trond status <node>` | Show node state, block height, sync progress |
+| `trond status <node>` | Node state, block height, sync progress + `healthy`, `container_id`, log locator, `is_private`, `build_revision`, `genesis_block_id` (JSON) |
 | `trond list` | List all managed nodes |
 | `trond stop` / `start` / `restart` `<node>` | Process control |
 | `trond remove <node>` | Remove a deployed node |
@@ -315,6 +318,12 @@ cache management, and MCP usage: [build pipeline quickstart](specs/002-trond-bui
 | `trond network status` | Show private network status |
 | `trond network destroy` | Destroy a private network |
 
+### Private-network safety (for unattended agents)
+
+`status` / `list` / `inspect` report `is_private` (true only when `network: private`), so an agent can *prove* a rig is a throwaway private net before touching it.
+
+Pass `--require-private` (a persistent flag on any command) or export `TROND_REQUIRE_PRIVATE=1` once, and trond **refuses to mutate a non-private node** — `PRIVATE_NETWORK_REQUIRED`, exit 2. It covers every mutating verb: `apply`, `network create/add/destroy/upgrade`, `start` / `stop` / `restart` / `remove` / `rollback` / `upgrade`, and the chaos primitives (`disconnect` / `partition` / …), plus the MCP `apply` tool's `require_private` arg. The gate is a one-way floor: once the env is set, `--require-private=false` cannot turn it off. Read-only verbs (`status`, `inspect`, `wait`, `diagnose`) are always allowed. Default behaviour is unchanged when neither is set.
+
 ### Snapshots
 
 Skip the days-long sync from genesis by pulling an official chain database snapshot. trond streams the tarball through gunzip + tar in one pipeline (no on-disk `.tgz`), MD5-verifies inline, and pre-checks free disk space.
@@ -327,8 +336,12 @@ Skip the days-long sync from genesis by pulling an official chain database snaps
 | `trond snapshot jobs` | List background download jobs (with `--detach`) |
 | `trond snapshot logs <job-id> [-f] [-n N]` | Tail / follow a background download's log |
 | `trond snapshot stop <job-id> [--force]` | SIGTERM (SIGKILL with `--force`) a background download |
+| `trond snapshot clone <src> <dst>` | Copy-on-write clone a chain-DB dir into a fresh path (warm-pool fixtures) |
+| `trond snapshot clone --from-node <name> <dst>` | Same, resolving `<src>` from a STOPPED local managed node |
 
 `--detach` re-execs trond as a session leader (`Setsid`); the child becomes PPID 1 and survives terminal close. Logs land at `~/.trond/snapshots/<id>.log`. Existing chain data is refused without `--force` (HUMAN_REQUIRED, exit 10); pre-existing `userdata/` is preserved across extraction. `--dry-run` prints the plan (URL, expected size, free space, would-overwrite) without sending a single GET.
+
+`snapshot clone` forks a chain DB into an isolated fixture in seconds: same filesystem → copy-on-write (APFS `clonefile` / Linux `FICLONE`, near-zero extra disk); across filesystems → a full byte copy with a warning (the JSON `method` is `clonefile` / `ficlone` / `copy`). `<dst>` must not exist; the source must be quiescent. `--from-node` resolves a stopped node's chain-DB dir from state — jar and docker **bind-mount** nodes on a **local** target (a default named-volume docker node is refused, since its DB isn't a host path).
 
 ### Monitoring
 

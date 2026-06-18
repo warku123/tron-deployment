@@ -12,6 +12,28 @@ The agent-ergonomics arc lands across four sequenced PRs:
 **#153** (`trond mcp`) → **#154** (`trond recipe`).
 
 ### Added
+- **Agent integration arc (ai-ops): machine-observable, provably-private rigs.**
+  - (#190/#193/#196) **Private-net safety gate (C1).** `is_private` is a
+    queryable fact in `status`/`list`/`inspect`. A persistent
+    `--require-private` flag + `TROND_REQUIRE_PRIVATE` env make trond refuse
+    to mutate any non-private node (`PRIVATE_NETWORK_REQUIRED`, exit 2) —
+    across `apply`, `network create/add/destroy/upgrade`, every per-node
+    mutator (`start`/`stop`/`restart`/`remove`/`rollback`/`upgrade`), the
+    chaos primitives, and the MCP `apply` tool. One-way floor (env can't be
+    overridden); enforced on recorded state before any target resolution.
+  - (#191) **Machine-observable rig state (A1).** `status`/`inspect -o json`
+    gain `healthy` (RPC-liveness, real-block gated), `container_id`, and a
+    runtime-discriminated `logs` locator (docker exec path / journald unit).
+  - (#195) **Build identity (B1).** `status`/`inspect` surface
+    `build_cache_key` + a clean `build_revision` (the java-tron commit a
+    source-built node runs).
+  - (#197) **`genesis_block_id` (A1).** `status` emits the block-0 TRON block
+    id — the chain's identity fingerprint — from a live probe.
+  - (#192/#198) **Warm-pool clones (B3).** `trond snapshot clone <src> <dst>`
+    copy-on-write clones a chain-DB dir (APFS clonefile / Linux FICLONE,
+    byte-copy fallback); `--from-node <name>` resolves a stopped local node's
+    DB dir from state (jar + docker bind-mount).
+  - (#182) Nile snapshot source URL refreshed + a weekly source-probe.
 - (#164/#165/#166) Shadow-fork release-gate fixes empirically validated
   on amd64 + qemu-arm64 EC2 (2026-05-25/26):
   - `internal/dbfork/db/leveldb.go` Close() now sweeps `.ldb → .sst`
