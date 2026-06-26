@@ -212,6 +212,44 @@ transactions that should be PQ-signed (the rest are ECDSA-signed):
   before generating; txgen does not perform the permission update. The same
   `seed` always derives the same keypair/address, so provision once and reuse.
 
+The config example above uses `ML_DSA_44` (seed-derived, default build). `FN_DSA_512`
+is set up differently — see below.
+
+### Falcon-512 (FN_DSA_512) setup
+
+`FN_DSA_512` needs the falcon build and an explicit keypair (it is **not** seed-derived):
+
+1. **Build with liboqs** (see [Build variants](#build-variants)):
+   ```bash
+   brew install liboqs          # macOS (Linux: build liboqs from source)
+   make build-txgen-falcon      # → bin/txgen with Falcon-512
+   ```
+2. **Generate a keypair** with the `keygen` subcommand (falcon build only):
+   ```bash
+   txgen keygen --scheme FN_DSA_512 --out falcon-keypair.json
+   ```
+   It prints the derived TRON address plus a ready-to-paste `pq` block, and writes
+   `privateKey` (1281-byte liboqs secret key, 2562 hex chars) and `publicKey`
+   (896-byte h polynomial, 1792 hex chars) to the file.
+3. **Configure** `generate.pq` with those keys (use `privateKey` + `publicKey`
+   instead of `seed`):
+   ```json
+   "pq": {
+     "enabled": true,
+     "scheme": "FN_DSA_512",
+     "privateKey": "<2562-hex liboqs SK from keygen>",
+     "publicKey":  "<1792-hex h polynomial from keygen>",
+     "ratio": 30
+   }
+   ```
+4. **Provision the account**: fund the printed address with TRX (activation +
+   transfer amounts) **and** register the Falcon public key on the account via
+   `AccountPermissionUpdate` — `keygen` prints the exact steps.
+
+> Recap: `ML_DSA_44` → `seed` (default build, no liboqs). `FN_DSA_512` → `privateKey`
+> + `publicKey` from `keygen` (falcon build). `pq.ratio` and the two-senders rule
+> apply to both schemes.
+
 ---
 
 ## Prerequisites

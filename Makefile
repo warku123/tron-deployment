@@ -225,13 +225,14 @@ build-txgen-falcon: $(GO_BOOTSTRAP)
 		echo "   Install with: brew install liboqs  (macOS)"; \
 		echo "   or build from source: https://github.com/open-quantum-safe/liboqs"; \
 		exit 0; \
-	fi
-	@mkdir -p bin
+	fi; \
+	mkdir -p bin; \
+	echo "building bin/txgen with Falcon-512 (liboqs)..."; \
 	CGO_ENABLED=1 \
 	CGO_CFLAGS="$(LIBOQS_CFLAGS)" \
 	CGO_LDFLAGS="$(LIBOQS_LDFLAGS) $(OPENSSL_LDFLAGS)" \
-	$(GO) build -tags falcon -ldflags "$(LDFLAGS)" -o bin/txgen ./tools/txgen
-	@echo "✓ bin/txgen (with Falcon-512 via liboqs) built"
+	$(GO) build -tags falcon -ldflags "$(LDFLAGS)" -o bin/txgen ./tools/txgen && \
+	echo "✓ bin/txgen (with Falcon-512 via liboqs) built"
 
 ## install-txgen-falcon: Build + copy Falcon-enabled txgen into $(GOBIN).
 install-txgen-falcon: build-txgen-falcon
