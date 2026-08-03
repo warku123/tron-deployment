@@ -653,8 +653,11 @@ An automated caller that should only ever touch a throwaway private chain
   var. When set, every mutating verb refuses a non-private node up front
   with `PRIVATE_NETWORK_REQUIRED` (exit 2): `apply`, `network create`, and
   the per-node mutators `start` / `stop` / `restart` / `remove` /
-  `rollback` / `upgrade`. The MCP `apply` tool takes the same gate via a
-  `require_private` argument. Export `TROND_REQUIRE_PRIVATE=1` once at
+  `rollback` / `upgrade` / `auto-heal`. The MCP `apply` tool takes the same
+  gate via a `require_private` argument, and the MCP `auto_heal` tool honours
+  the flag/env floor. Proposal-only calls stay allowed: `auto-heal --dry-run`
+  / `auto_heal dry_run=true` never starts a node or writes state, so the
+  preview still returns under the gate. Export `TROND_REQUIRE_PRIVATE=1` once at
   session start and an unattended agent is *mechanically* incapable of
   mutating a mainnet/nile rig — no per-call discipline, instead of trusting
   a standing rule.
@@ -667,6 +670,24 @@ An automated caller that should only ever touch a throwaway private chain
   refuses with `PRIVATE_NETWORK_REQUIRED` rather than `TARGET_UNREACHABLE`.
   A node with no recorded network (deployed before network tracking) is
   fail-safe-refused with a re-apply hint.
+- `apply` is gated on BOTH networks: the intent's `network:` label AND the
+  recorded network of the node already deployed under that `name:`. An
+  intent cannot re-label a mainnet/nile node as `private` to get at it —
+  that refuses with `PRIVATE_NETWORK_REQUIRED` under the gate, and with
+  `NETWORK_MISMATCH` (exit 2) even when the gate is off, so a node's
+  recorded network is never silently downgraded to `private`. Deploying a
+  brand-new node is unaffected, and re-applying an intent whose network
+  matches the deployed one behaves exactly as before. To genuinely convert
+  a node between networks, `trond remove` it first, then apply.
+- `network add` is gated on BOTH networks: the intent's own `network:`
+  label AND the recorded networks of the nodes already in the enclave
+  named by `--network`. A `network: private` intent therefore cannot add
+  a node into a mainnet/nile enclave (where it would be peered with the
+  production nodes and scraped by their Prometheus) — that refuses with
+  `PRIVATE_NETWORK_REQUIRED`, naming the offending member. Under the gate
+  an enclave with no nodes recorded in state cannot be proven private, so
+  adding to it is refused too; with the gate off, `add` behaves exactly as
+  before.
 
 The read-only verbs (`status`, `wait`, `inspect`, `list`, `diagnose`)
 never mutate and are always safe. The multi-node mutators are now gated
