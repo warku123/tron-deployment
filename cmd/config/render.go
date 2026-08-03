@@ -50,6 +50,12 @@ type renderedNode struct {
 	Compose  string `json:"compose,omitempty"`
 	Systemd  string `json:"systemd,omitempty"`
 	JVMArgs  string `json:"jvm_args"`
+	// Redacted marks a node whose witness private key was replaced by
+	// a `<REDACTED:ENV_NAME>` placeholder in HOCON. The rendered config
+	// is then a PREVIEW: java-tron rejects the placeholder, so the file
+	// written by --output-dir must not be deployed as-is. Deploy with
+	// `trond apply`, which inlines the real key without printing it.
+	Redacted bool `json:"redacted,omitempty"`
 }
 
 func runRender(cmd *cobra.Command, args []string) error {
@@ -71,15 +77,23 @@ func runRender(cmd *cobra.Command, args []string) error {
 	templateDir := findTemplateDir()
 
 	rendered := make([]renderedNode, 0, len(parsed.Nodes))
+	anyRedacted := false
 
 	for i, node := range parsed.Nodes {
 		if renderNodeFilter >= 0 && i != renderNodeFilter {
 			continue
 		}
-		// Render HOCON config
-		hocon, err := render.RenderHOCON(templateDir, parsed, &node)
+		// Render HOCON config. This is a PREVIEW surface — the result
+		// is printed to stdout, inlined into the JSON payload and
+		// written to --output-dir — so we take the redacted display
+		// form, never the deployable one.
+		r, err := render.RenderHOCONWithSecrets(templateDir, parsed, &node)
 		if err != nil {
 			return output.NewError("RENDER_ERROR", output.ExitGeneralError, err.Error())
+		}
+		hocon := r.Config
+		if r.Redacted {
+			anyRedacted = true
 		}
 
 		// Render JVM args. Without a live target we can't probe JDK or real
@@ -109,6 +123,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 			Compose:  composeYAML,
 			Systemd:  systemdUnit,
 			JVMArgs:  jvmArgs,
+			Redacted: r.Redacted,
 		})
 
 		// --output-dir is an explicit "write to disk" request — we
@@ -126,12 +141,31 @@ func runRender(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// A redacted render is a preview, not a deployable artifact:
+	// java-tron rejects the `<REDACTED:...>` placeholder. Say so on
+	// stderr (which never mixes with the stdout payload) so an operator
+	// or agent piping render → docker compose up isn't left wondering
+	// why the witness refuses to sign.
+	if anyRedacted {
+		fmt.Fprintln(os.Stderr,
+			"warning: witness private key redacted from the rendered config — "+
+				"this output is a PREVIEW and java-tron will reject it. "+
+				"Use `trond apply` to deploy, which inlines the real key without printing it.")
+	}
+
 	if outputFmt == "json" {
-		return output.WriteJSON(os.Stdout, map[string]any{
+		payload := map[string]any{
 			"name":    parsed.Name,
 			"network": parsed.Network,
 			"nodes":   rendered,
-		})
+		}
+		if anyRedacted {
+			// Machine-readable twin of the stderr warning, so agents
+			// parsing only stdout still see that the artifact is a
+			// preview.
+			payload["redacted"] = true
+		}
+		return output.WriteJSON(os.Stdout, payload)
 	}
 
 	if renderOutputDir != "" {
@@ -160,15 +194,28 @@ func runRender(cmd *cobra.Command, args []string) error {
 }
 
 func writeRenderedFiles(dir, name string, hocon, compose, systemd string) error {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// 0700, not 0755: the .conf we are about to drop in here carries the
+	// witness signing key inlined by render.RenderHOCON (typesafe-config
+	// does no ${ENV} substitution, so the raw key ends up in the body).
+	// An existing directory keeps whatever mode it already has — a 0755
+	// directory holding a 0600 file is not an exposure, and silently
+	// tightening a path the operator chose is not ours to do.
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
 	configName := fmt.Sprintf("%s.conf", name)
-	if err := os.WriteFile(filepath.Join(dir, configName), []byte(hocon), 0644); err != nil {
+	if err := writeSecretFile(filepath.Join(dir, configName), []byte(hocon)); err != nil {
 		return fmt.Errorf("write hocon: %w", err)
 	}
 
+	// compose / systemd stay 0644, matching what the deploy path already
+	// writes for the same artifacts. trond never *resolves* a secret into
+	// them: the keystore password is emitted as the literal ${NAME}
+	// placeholder and the witness key fields are never referenced here.
+	// (An operator who types a literal secret into intent.extra_env has it
+	// copied verbatim into both — that is their own value, handled exactly
+	// as the deploy path handles it, and not what this finding is about.)
 	if compose != "" {
 		if err := os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte(compose), 0644); err != nil {
 			return fmt.Errorf("write compose: %w", err)
@@ -182,6 +229,37 @@ func writeRenderedFiles(dir, name string, hocon, compose, systemd string) error 
 		}
 	}
 
+	return nil
+}
+
+// writeSecretFile writes data to path with mode 0600, enforcing that mode
+// even when path already exists.
+//
+// os.WriteFile's perm argument applies only when it creates the file, so a
+// re-render into a stable --output-dir would otherwise keep a mode left
+// behind by an earlier run (0644 for anything written before this change)
+// and publish the witness key again. The chmod runs on the open descriptor
+// (fchmod), so it can only ever affect the inode we just opened, never a
+// path an attacker swapped in behind us; and it runs *before* the body is
+// written, so the secret bytes never exist in a loosely-moded file even
+// momentarily, and a failed write leaves an empty 0600 file rather than a
+// truncated world-readable one.
+func writeSecretFile(path string, data []byte) (err error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	if err := f.Chmod(0600); err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
 	return nil
 }
 
