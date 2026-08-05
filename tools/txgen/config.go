@@ -57,12 +57,45 @@ type Config struct {
 
 	// Broadcast: read CSV, fire to node at tpsLimit, write txIDs.
 	Broadcast struct {
-		InputDir   string `json:"inputDir"`
-		TpsLimit   int    `json:"tpsLimit"`
-		Workers    int    `json:"workers"` // concurrent HTTP workers; 0 = auto (tpsLimit/50, min 4, max 256)
+		InputDir string `json:"inputDir"`
+		TpsLimit int    `json:"tpsLimit"`
+		Workers  int    `json:"workers"` // concurrent HTTP workers; 0 = auto (tpsLimit/50, min 4, max 256)
+
+		// Transport selects the wire protocol: "http" (default) posts to
+		// /wallet/broadcasttransaction on :8090, "grpc" calls the Wallet
+		// service's BroadcastTransaction on :50051.
+		Transport string `json:"transport"`
+
+		// GRPC configures the grpc transport. Ignored when transport=http.
+		//
+		// Concurrency is expressed as connections x callsPerConnection
+		// rather than as `workers`, because the two axes are not
+		// interchangeable over gRPC: one ClientConn multiplexes every call
+		// onto a single HTTP/2 connection, and java-tron caps in-flight
+		// calls per connection (node.rpc.maxConcurrentCallsPerConnection).
+		// Raising `workers` alone therefore stops adding load once the cap
+		// is reached; the extra calls queue in the client transport instead.
+		GRPC struct {
+			// Endpoint is host:port. Default: the host of `node` with port 50051.
+			Endpoint string `json:"endpoint"`
+			// Connections is the number of independent ClientConns, i.e. the
+			// number of HTTP/2 connections the server sees. Default 1.
+			Connections int `json:"connections"`
+			// CallsPerConnection is how many calls each connection keeps in
+			// flight. Default 100, matching java-tron's own cap so the
+			// default run sits exactly at the server's limit.
+			CallsPerConnection int `json:"callsPerConnection"`
+		} `json:"grpc"`
+
 		SaveTxID   bool   `json:"saveTxId"`
 		TxIDFile   string `json:"txIdFile"`
 		ReportFile string `json:"reportFile"`
+
+		// workersExplicit records whether the config file set `workers`
+		// before applyDefaults filled it in. The grpc transport derives
+		// `workers` from its own two axes, so a hand-set value there is a
+		// contradiction we reject rather than silently override.
+		workersExplicit bool
 	} `json:"broadcast"`
 
 	// Statistic: post-broadcast TPS calculation across a block range.
@@ -108,7 +141,7 @@ func (c *Config) applyDefaults() {
 		c.Generate.TransferAmount = 1
 	}
 	if c.Generate.ExpirationMillis == 0 {
-		c.Generate.ExpirationMillis = 86_400_000 // 1 day
+		c.Generate.ExpirationMillis = defaultExpirationMillis
 	}
 	if c.Generate.TRC20FeeLimit == 0 {
 		c.Generate.TRC20FeeLimit = 100_000_000 // 100 TRX
@@ -128,6 +161,28 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Broadcast.TpsLimit == 0 {
 		c.Broadcast.TpsLimit = 1000
+	}
+	if c.Broadcast.Transport == "" {
+		c.Broadcast.Transport = TransportHTTP
+	}
+	// Record this before any default can overwrite it — validate needs to
+	// tell "the user asked for N workers" from "we picked N".
+	c.Broadcast.workersExplicit = c.Broadcast.Workers > 0
+	if c.Broadcast.Transport == TransportGRPC {
+		g := &c.Broadcast.GRPC
+		if g.Endpoint == "" {
+			g.Endpoint = defaultGRPCEndpoint(c.Node)
+		}
+		if g.Connections == 0 {
+			g.Connections = 1
+		}
+		if g.CallsPerConnection == 0 {
+			g.CallsPerConnection = defaultCallsPerConnection
+		}
+		// One worker per in-flight call slot: the worker pool *is* the
+		// concurrency limiter, so "N calls in flight on connection k" is
+		// structural rather than something a semaphore has to maintain.
+		c.Broadcast.Workers = g.Connections * g.CallsPerConnection
 	}
 	if c.Broadcast.Workers == 0 {
 		c.Broadcast.Workers = c.Broadcast.TpsLimit / 50
@@ -149,11 +204,86 @@ func (c *Config) applyDefaults() {
 	}
 }
 
+// Transaction expiration bounds, both taken from java-tron.
+//
+// A node rejects a transaction unless
+//
+//	headBlockTime < expiration <= headBlockTime + MAXIMUM_TIME_UNTIL_EXPIRATION
+//
+// (framework/src/main/java/org/tron/core/db/Manager.java, validateCommon;
+// Constant.MAXIMUM_TIME_UNTIL_EXPIRATION = 24h).
+//
+// txgen measures expiration from raw_data.timestamp — the node's clock
+// when it built the transaction — while the node checks against the head
+// block's timestamp, which trails it by up to one block interval. So an
+// expirationMillis *at* the ceiling produces
+//
+//	rawTimestamp + 24h > headBlockTime + 24h  <=>  rawTimestamp > headBlockTime
+//
+// which holds for most of every block interval: the transaction is
+// rejected as expired the moment it is created, and only starts being
+// accepted once the chain produces a block past its creation time. That
+// was the shipped default, and it made "generate then broadcast" fail
+// while "generate, wait, broadcast" worked.
+const (
+	// defaultExpirationMillis matches java-tron's own default for
+	// transactions it builds (Constant.TRANSACTION_DEFAULT_EXPIRATION_TIME).
+	defaultExpirationMillis = 60_000
+
+	// maxExpirationMillis is Constant.MAXIMUM_TIME_UNTIL_EXPIRATION. Values
+	// at or above it can never be accepted; values just below it are
+	// accepted only once the head block catches up to the creation time.
+	maxExpirationMillis = 24 * 60 * 60 * 1_000
+)
+
+// maxBroadcastLanes bounds connections x callsPerConnection. Each lane is
+// a goroutine blocked on an RPC, so the ceiling is about keeping a typo
+// (a stray zero) from turning into a million goroutines.
+const maxBroadcastLanes = 65536
+
+// validateBroadcast checks the transport selection and the settings that
+// belong to it. It runs for every subcommand.
+func (c *Config) validateBroadcast() error {
+	g := c.Broadcast.GRPC
+	switch c.Broadcast.Transport {
+	case TransportHTTP:
+		// Catch grpc settings written under the http transport: they would
+		// otherwise be silently inert, and the run would look configured.
+		if g.Endpoint != "" || g.Connections != 0 || g.CallsPerConnection != 0 {
+			return errors.New(`broadcast.grpc.* requires broadcast.transport = "grpc"`)
+		}
+	case TransportGRPC:
+		if c.Broadcast.workersExplicit {
+			return errors.New("broadcast.workers does not apply to the grpc transport; " +
+				"set broadcast.grpc.connections x broadcast.grpc.callsPerConnection instead")
+		}
+		if g.Connections < 1 {
+			return fmt.Errorf("broadcast.grpc.connections must be > 0, got %d", g.Connections)
+		}
+		if g.CallsPerConnection < 1 {
+			return fmt.Errorf("broadcast.grpc.callsPerConnection must be > 0, got %d", g.CallsPerConnection)
+		}
+		if g.Connections > maxBroadcastLanes/g.CallsPerConnection {
+			return fmt.Errorf("broadcast.grpc.connections x callsPerConnection must be <= %d, got %d x %d",
+				maxBroadcastLanes, g.Connections, g.CallsPerConnection)
+		}
+	default:
+		return fmt.Errorf("broadcast.transport %q unsupported (supported: %s, %s)",
+			c.Broadcast.Transport, TransportHTTP, TransportGRPC)
+	}
+	return nil
+}
+
 // validate is only meaningful for the `generate` subcommand. Other
 // subcommands ignore the `generate` section entirely, so we don't fail
 // here for missing fields — runGenerate will surface them with a clear
 // error if it actually needs them.
 func (c *Config) validate() error {
+	// Broadcast settings are validated unconditionally — unlike the
+	// generate section below, they are not skipped for other subcommands.
+	if err := c.validateBroadcast(); err != nil {
+		return err
+	}
 	tt := c.Generate.TxType
 	sum := tt.Transfer + tt.TransferTRC10 + tt.TransferTRC20
 	// Skip generate-section validation if all three weights are zero —
@@ -208,6 +338,12 @@ func (c *Config) validate() error {
 	}
 	if c.Generate.ExpirationMillis < 0 {
 		return errors.New("generate.expirationMillis must be >= 0")
+	}
+	if c.Generate.ExpirationMillis >= maxExpirationMillis {
+		return fmt.Errorf("generate.expirationMillis must be < %d (java-tron's "+
+			"MAXIMUM_TIME_UNTIL_EXPIRATION); at or above it every transaction is "+
+			"rejected with TRANSACTION_EXPIRATION_ERROR, got %d",
+			maxExpirationMillis, c.Generate.ExpirationMillis)
 	}
 	return nil
 }
