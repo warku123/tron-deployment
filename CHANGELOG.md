@@ -12,6 +12,22 @@ The agent-ergonomics arc lands across four sequenced PRs:
 **#153** (`trond mcp`) → **#154** (`trond recipe`).
 
 ### Added
+- **`jvm.extra_opts`** — an escape hatch for JVM flags outside the closed
+  heap/GC field set, appended last so they win on any last-flag-wins
+  option. Needed because trond runs the JAR directly and so never reads
+  java-tron's `gradle/java-tron.vmoptions`, which its distribution launcher
+  (`bin/FullNode`) does: `-Dio.netty.allocator.type=pooled` is the live
+  example — java-tron sets it to opt out of netty 4.2's adaptive allocator,
+  and without the hatch a trond-deployed node silently runs on the
+  allocator upstream deliberately avoided. Restricted to `-D<key>=<value>`
+  and `-XX:…`; whitespace and quoting characters are refused, so one entry
+  is always exactly one argument.
+- `apply.Options.SkipMonitoring` suppresses the per-node monitoring stack
+  while leaving `Intent.Monitoring` intact for rendering. `network create`
+  needs both halves: `RenderHOCON` keys its metrics auto-enable off the
+  field, but the network owns one stack scraping every node — without the
+  flag each node deployed its own Prometheus and the last one won, leaving
+  a stack that looks healthy while observing a fraction of the network.
 - **Agent integration arc (ai-ops): machine-observable, provably-private rigs.**
   - (#190/#193/#196) **Private-net safety gate (C1).** `is_private` is a
     queryable fact in `status`/`list`/`inspect`. A persistent
@@ -192,6 +208,43 @@ The agent-ergonomics arc lands across four sequenced PRs:
   (was a documented TODO before); refuses `/` and empty paths
 
 ### Fixed
+- **`config_overrides` rendered Go syntax, not HOCON.** `hoconValue` fell
+  back to `fmt.%v` for slices and maps, emitting `[map[address:T… voteCount:5000]]`
+  — which no HOCON parser accepts — so every list-valued override was
+  unusable and a multi-witness `genesis.block.witnesses` (the two-SR private
+  net tron-docker documents) could not be expressed in an intent at all. The
+  same function used `fmt.%q` for strings, which emits Go's `\x01` for a
+  control byte rather than JSON's `\u0001`. Both now render through a JSON
+  encoder (HOCON is a JSON superset) with HTML escaping off so URLs survive
+  verbatim. Numbers deliberately stay on `fmt` — `%v` is already
+  JSON-compatible there and routing them through the encoder would change
+  every rendered config for no correctness gain.
+- **`build.revision` labelled the artifact without building it.** The git
+  worktree checkout ran only when `build.patches` was non-empty, so an
+  explicit branch/tag/sha compiled whatever the working tree happened to
+  hold and then stamped the artifact — cache key, manifest, and
+  `status.build_revision` — with the revision that was asked for. Two
+  `trond build --revision <ref>` runs against different refs could hand back
+  byte-identical artifacts under different labels, silently reducing a
+  base-vs-head comparison to comparing an artifact with itself. The
+  worktree now runs whenever an explicit non-HEAD revision is requested.
+  `revision: HEAD` still builds the working tree, dirty edits included —
+  that is the dev inner loop, and the dirty state is already folded into
+  the cache key.
+- **`network create` bypassed `internal/apply.Apply`.** Its hand-rolled
+  render + deploy + state loop had drifted from the core in three ways: it
+  never called `internal/build`, so a node declaring `build:` rendered an
+  empty `image:` and deployed nothing usable — no error, no warning, and a
+  green `config validate`; it hardcoded JDK 17 for JVM arg selection
+  instead of probing the target; and it hardcoded the docker runtime
+  instead of honouring `target.runtime`. Every node now goes through
+  `Apply`, projected to a single-node intent with its own name and hash so
+  idempotency stays per node.
+- **`Apply` did not persist `P2PPort`.** `network add` builds a joining
+  node's peer list from the `P2PPort` of every node in state and skips any
+  entry where it is zero, so a node deployed through `Apply` was invisible
+  as a peer: the late joiner came up with an empty peer list, never
+  connected, and neither command said why.
 - Witness private key inlined into rendered HOCON — typesafe-config does
   not perform `${ENV}` substitution, the literal `${SR_KEY}` was being
   read as a 9-char witness key and the SR shut down with WITNESS_INIT(1)
