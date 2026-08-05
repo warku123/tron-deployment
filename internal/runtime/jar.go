@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/tronprotocol/tron-deployment/internal/target"
@@ -37,16 +39,21 @@ func (r *JarRuntime) Deploy(ctx context.Context, opts DeployOpts) error {
 		}
 	}
 
-	// Write config file
+	// Write config file. Tracked: systemd has no idea this file exists,
+	// and java-tron parses it once at JVM startup.
+	tracker := newChangeTracker(r.target)
 	configPath := filepath.Join(installPath, "config.conf")
-	if err := r.target.WriteFile(ctx, configPath, opts.ConfigData, 0644); err != nil {
+	if err := tracker.write(ctx, configPath, opts.ConfigData, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 
-	// Write systemd unit file
+	// Write systemd unit file. Also tracked: daemon-reload below makes
+	// systemd read the new unit, but it does not restart a unit that is
+	// already running, so a changed ExecStart (new JVM args, new jar
+	// path) would not reach the process.
 	unitName := fmt.Sprintf("tron-%s.service", opts.Name)
 	unitPath := filepath.Join("/etc/systemd/system", unitName)
-	if err := r.target.WriteFile(ctx, unitPath, opts.SystemdData, 0644); err != nil {
+	if err := tracker.write(ctx, unitPath, opts.SystemdData, 0644); err != nil {
 		return fmt.Errorf("write systemd unit: %w", err)
 	}
 
@@ -55,15 +62,28 @@ func (r *JarRuntime) Deploy(ctx context.Context, opts DeployOpts) error {
 		return fmt.Errorf("daemon-reload: %w", err)
 	}
 
-	// Set environment variables for the service
-	for key, val := range opts.EnvVars {
+	// Set environment variables for the service.
+	//
+	// All of them go into one drop-in. The previous version wrote the file
+	// once per key inside the loop, each write replacing the last, so only
+	// one variable survived — and which one was whatever Go's randomised
+	// map iteration visited last. A witness node whose key arrives via
+	// EnvVars alongside anything else would start with the key missing on
+	// some deploys and present on others.
+	if len(opts.EnvVars) > 0 {
 		overridePath := fmt.Sprintf("/etc/systemd/system/%s.d", unitName)
 		if _, err := r.target.Exec(ctx, "mkdir", "-p", overridePath); err != nil {
 			return fmt.Errorf("create override dir: %w", err)
 		}
-		envOverride := fmt.Sprintf("[Service]\nEnvironment=%s=%s\n", key, val)
+		var sb strings.Builder
+		sb.WriteString("[Service]\n")
+		for _, key := range slices.Sorted(maps.Keys(opts.EnvVars)) {
+			fmt.Fprintf(&sb, "Environment=%s=%s\n", key, opts.EnvVars[key])
+		}
+		// Tracked for the same reason as the unit file: a changed
+		// Environment= only reaches the process across a restart.
 		envPath := filepath.Join(overridePath, "env.conf")
-		if err := r.target.WriteFile(ctx, envPath, []byte(envOverride), 0600); err != nil {
+		if err := tracker.write(ctx, envPath, []byte(sb.String()), 0600); err != nil {
 			return fmt.Errorf("write env override: %w", err)
 		}
 	}
@@ -74,6 +94,15 @@ func (r *JarRuntime) Deploy(ctx context.Context, opts DeployOpts) error {
 
 	if _, err := r.target.Exec(ctx, "systemctl", "enable", "--now", unitName); err != nil {
 		return fmt.Errorf("enable + start service: %w", err)
+	}
+
+	// enable --now starts a stopped unit; it does nothing to a running
+	// one. Without this an existing node would keep its old config, unit
+	// and environment while the deploy reported success.
+	if tracker.changed {
+		if _, err := r.target.Exec(ctx, "systemctl", "restart", unitName); err != nil {
+			return fmt.Errorf("restart after config change: %w", err)
+		}
 	}
 
 	return nil
