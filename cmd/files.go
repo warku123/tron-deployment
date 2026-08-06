@@ -89,7 +89,7 @@ func runFilesPut(cmd *cobra.Command, args []string) error {
 		// Direct host write via Target.WriteFile.
 		if err := nc.Target.WriteFile(ctx, remoteDst, data, 0o644); err != nil {
 			writeAudit(auditEvent{Command: "files put", Node: nodeName, Target: nc.Target.String(),
-				Result: "error", ErrorCode: "FILES_ERROR", Start: start})
+				Result: "error", ErrorCode: "FILES_ERROR", Detail: remoteDst, Start: start})
 			return output.NewError("FILES_ERROR", output.ExitGeneralError,
 				fmt.Sprintf("write to %s: %v", remoteDst, err))
 		}
@@ -115,22 +115,27 @@ func runFilesPut(cmd *cobra.Command, args []string) error {
 
 		if _, err := nc.Target.Exec(ctx, "docker", "cp", stagePath, fmt.Sprintf("%s:%s", nodeName, remoteDst)); err != nil {
 			writeAudit(auditEvent{Command: "files put", Node: nodeName, Target: nc.Target.String(),
-				Result: "error", ErrorCode: "FILES_ERROR", Start: start})
+				Result: "error", ErrorCode: "FILES_ERROR", Detail: remoteDst, Start: start})
 			return output.NewError("FILES_ERROR", output.ExitGeneralError,
 				fmt.Sprintf("docker cp into %s: %v", nodeName, err))
 		}
 	}
 
-	// Audited like the other verbs that change a node. Records that bytes
-	// were written and where, not their contents.
+	// Records where the bytes went, never what they were.
 	writeAudit(auditEvent{Command: "files put", Node: nodeName, Target: nc.Target.String(),
-		Result: "success", Start: start})
+		Result: "success", Detail: remoteDst, Start: start})
 	return writeFilesResult(outputFmt, "put", nodeName, localSrc, remoteDst, len(data))
 }
 
 func runFilesGet(cmd *cobra.Command, args []string) error {
 	nodeName, remoteSrc, localDst := args[0], args[1], args[2]
 	outputFmt, _ := cmd.Flags().GetString("output")
+
+	// get reads an arbitrary path off the node. That is not a mutation, so
+	// it is not gated — but a jar node's config.conf carries the
+	// block-signing key in localwitness, so which path was read is worth
+	// recording even when reading it was entirely legitimate.
+	start := time.Now()
 
 	nc, err := resolveNodeContext(nodeName)
 	if err != nil {
@@ -178,6 +183,8 @@ func runFilesGet(cmd *cobra.Command, args []string) error {
 		return output.NewError("FILES_ERROR", output.ExitGeneralError, err.Error())
 	}
 
+	writeAudit(auditEvent{Command: "files get", Node: nodeName, Target: nc.Target.String(),
+		Result: "success", Detail: remoteSrc, Start: start})
 	return writeFilesResult(outputFmt, "get", nodeName, remoteSrc, localDst, len(data))
 }
 
