@@ -94,18 +94,30 @@ func calculateHeapMax(totalMemoryGB int, jvm *intent.JVMConfig) string {
 		return jvm.HeapMax
 	}
 
+	var heapMax string
 	switch {
 	case totalMemoryGB >= 64:
-		return "24g"
+		heapMax = "24g"
 	case totalMemoryGB >= 32:
-		return "14g"
+		heapMax = "14g"
 	case totalMemoryGB >= 16:
-		return "8g"
+		heapMax = "8g"
 	case totalMemoryGB >= 8:
-		return "4g"
+		heapMax = "4g"
 	default:
-		return "2g"
+		heapMax = "2g"
 	}
+
+	// Keep native headroom for ZGC in the container. For sub-8GB limits,
+	// cap the start.sh tier at half the limit, computed in whole MB so 3GB
+	// becomes 1536m rather than truncating to 1g.
+	if totalMemoryGB > 0 && totalMemoryGB < 8 {
+		halfMB := totalMemoryGB * 1024 / 2
+		if halfMB < 2*1024 {
+			return fmt.Sprintf("%dm", halfMB)
+		}
+	}
+	return heapMax
 }
 
 func calculateHeapNew(heapMax string, jvm *intent.JVMConfig) string {
@@ -115,6 +127,12 @@ func calculateHeapNew(heapMax string, jvm *intent.JVMConfig) string {
 
 	// HeapNew ≈ HeapMax / 4
 	switch heapMax {
+	case "512m":
+		return "128m"
+	case "1024m":
+		return "256m"
+	case "1536m":
+		return "384m"
 	case "24g":
 		return "6g"
 	case "14g":

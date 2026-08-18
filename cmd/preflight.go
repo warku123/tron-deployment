@@ -74,6 +74,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 
 	// Memory check
 	checks = append(checks, checkMemory(cmd, tgt, parsed))
+	checks = append(checks, checkMemoryRecommended(parsed)...)
 
 	// Port check
 	for _, node := range parsed.Nodes {
@@ -195,6 +196,36 @@ func checkMemory(cmd *cobra.Command, tgt target.Target, parsed *intent.Intent) c
 	}
 	return checkResult{Name: "memory", Status: "pass",
 		Message: fmt.Sprintf("%dGB total", memGB)}
+}
+
+// checkMemoryRecommended warns about container memory below java-tron's
+// official startup recommendation. This is an intent-side check: it does not
+// inspect the target's available memory or alter the existing memory check.
+func checkMemoryRecommended(parsed *intent.Intent) []checkResult {
+	var checks []checkResult
+	for i, node := range parsed.Nodes {
+		memoryGB := render.ParseMemoryGB(node.Resources.Memory)
+		if memoryGB <= 0 || memoryGB >= 8 {
+			continue
+		}
+		nodeName := parsed.Name
+		if len(parsed.Nodes) > 1 {
+			nodeName = fmt.Sprintf("%s-node%d", parsed.Name, i)
+		}
+		checks = append(checks, checkResult{
+			Name:    "memory-recommended",
+			Status:  "warning",
+			Message: fmt.Sprintf("node '%s' requests %s container memory, below java-tron's official minimum 8192MB (start.sh ALLOW_MIN_MEMORY); small containers risk JVM startup failure", nodeName, node.Resources.Memory),
+		})
+	}
+	if len(checks) == 0 {
+		return []checkResult{{
+			Name:    "memory-recommended",
+			Status:  "pass",
+			Message: "all nodes meet java-tron's official 8192MB minimum",
+		}}
+	}
+	return checks
 }
 
 // checkPorts probes every well-known port the intent will expose.
