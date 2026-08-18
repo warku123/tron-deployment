@@ -11,6 +11,7 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/state"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 var (
@@ -57,7 +58,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	for time.Now().Before(deadline) {
 		attempt++
 		url := fmt.Sprintf("http://127.0.0.1:%d/wallet/getnowblock", httpPort)
-		out, err := tgt.Exec(cmd.Context(), "curl", "-s", "--max-time", "5", url)
+		out, err := target.Get(cmd.Context(), tgt, url, 5*time.Second)
 		if err == nil {
 			var block struct {
 				BlockHeader struct {

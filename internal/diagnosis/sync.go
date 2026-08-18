@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
@@ -20,7 +21,7 @@ func (c *SyncChecker) Run(ctx context.Context, tgt target.Target, opts CheckOpts
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/wallet/getnowblock", opts.HTTPPort)
-	out, err := tgt.Exec(ctx, "curl", "-s", "--max-time", "5", url)
+	out, err := target.Get(ctx, tgt, url, 5*time.Second)
 	if err != nil {
 		return CheckResult{
 			Name:    c.Name(),

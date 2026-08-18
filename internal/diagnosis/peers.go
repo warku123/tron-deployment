@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
@@ -19,7 +20,7 @@ func (c *PeersChecker) Run(ctx context.Context, tgt target.Target, opts CheckOpt
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/wallet/listnodes", opts.HTTPPort)
-	out, err := tgt.Exec(ctx, "curl", "-s", "--max-time", "5", url)
+	out, err := target.Get(ctx, tgt, url, 5*time.Second)
 	if err != nil {
 		return CheckResult{
 			Name:    c.Name(),

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -233,7 +232,7 @@ func checkMemoryRecommended(parsed *intent.Intent) []checkResult {
 // so the check silently reported every port as available. Use net.Dial
 // instead — same behaviour as the diagnose port_listening checker, no
 // runtime dependency.
-func checkPorts(_ *cobra.Command, _ target.Target, node *intent.NodeSpec) []checkResult {
+func checkPorts(cmd *cobra.Command, tgt target.Target, node *intent.NodeSpec) []checkResult {
 	ports := []struct {
 		name string
 		port int
@@ -243,13 +242,12 @@ func checkPorts(_ *cobra.Command, _ target.Target, node *intent.NodeSpec) []chec
 		{"p2p", node.Ports.P2P},
 	}
 
-	dialer := net.Dialer{Timeout: 1500 * time.Millisecond}
 	var results []checkResult
 	for _, p := range ports {
 		if p.port == 0 {
 			continue
 		}
-		conn, err := dialer.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", p.port))
+		conn, err := target.DialContext(cmd.Context(), tgt, "tcp", fmt.Sprintf("127.0.0.1:%d", p.port), 1500*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
 			results = append(results, checkResult{

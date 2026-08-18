@@ -89,8 +89,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		"healthy": false,
 		"logs":    apply.LogsDescriptor(node),
 		"api_endpoints": map[string]any{
-			"http": fmt.Sprintf("http://127.0.0.1:%d", effectivePort(node.HTTPPort, 8090)),
-			"grpc": fmt.Sprintf("127.0.0.1:%d", effectivePort(node.GRPCPort, 50051)),
+			"http": fmt.Sprintf("http://%s:%d", target.EndpointHost(node.Target.Type, node.Target.Host), effectivePort(node.HTTPPort, 8090)),
+			"grpc": fmt.Sprintf("%s:%d", target.EndpointHost(node.Target.Type, node.Target.Host), effectivePort(node.GRPCPort, 50051)),
 		},
 	}
 

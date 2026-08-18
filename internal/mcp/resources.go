@@ -11,6 +11,7 @@ import (
 
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/state"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 // registerResources wires read-only data sources as MCP resources.
@@ -140,13 +141,14 @@ func readNodeEndpointsResource(_ context.Context, req *mcp.ReadResourceRequest) 
 	if err != nil {
 		return nil, err
 	}
+	host := target.EndpointHost(node.Target.Type, node.Target.Host)
 	endpoints := map[string]any{
 		"name":    node.Name,
 		"runtime": node.Runtime,
 		"target":  node.Target,
 		"endpoints": map[string]string{
-			"http": fmt.Sprintf("http://127.0.0.1:%d", node.HTTPPort),
-			"grpc": fmt.Sprintf("127.0.0.1:%d", node.GRPCPort),
+			"http": fmt.Sprintf("http://%s:%d", host, node.HTTPPort),
+			"grpc": fmt.Sprintf("%s:%d", host, node.GRPCPort),
 		},
 		"version": node.Version,
 		"labels":  node.Labels,

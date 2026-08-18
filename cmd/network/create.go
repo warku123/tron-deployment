@@ -326,10 +326,10 @@ func deployNetworkMonitoring(ctx context.Context, tgt target.Target, workDir str
 	}
 
 	urls := map[string]string{
-		"grafana_url": fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Grafana.Port),
+		"grafana_url": fmt.Sprintf("http://%s:%d", target.EndpointHost(parsed.Target.Type, parsed.Target.Host), parsed.Monitoring.Grafana.Port),
 	}
 	if parsed.Monitoring.Prometheus.Port > 0 {
-		urls["prometheus_url"] = fmt.Sprintf("http://127.0.0.1:%d", parsed.Monitoring.Prometheus.Port)
+		urls["prometheus_url"] = fmt.Sprintf("http://%s:%d", target.EndpointHost(parsed.Target.Type, parsed.Target.Host), parsed.Monitoring.Prometheus.Port)
 	}
 	return monitoringResult{
 		urls: urls,

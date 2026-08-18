@@ -13,6 +13,7 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/state"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 func stdoutWriter() io.Writer { return os.Stdout }
@@ -166,11 +167,12 @@ func buildManifest(ctx context.Context, nodes []state.ManagedNode) map[string]an
 
 func manifestForNode(ctx context.Context, n *state.ManagedNode) map[string]any {
 	endpoints := map[string]string{}
+	host := target.EndpointHost(n.Target.Type, n.Target.Host)
 	if n.HTTPPort != 0 {
-		endpoints["http"] = fmt.Sprintf("http://127.0.0.1:%d", n.HTTPPort)
+		endpoints["http"] = fmt.Sprintf("http://%s:%d", host, n.HTTPPort)
 	}
 	if n.GRPCPort != 0 {
-		endpoints["grpc"] = fmt.Sprintf("127.0.0.1:%d", n.GRPCPort)
+		endpoints["grpc"] = fmt.Sprintf("%s:%d", host, n.GRPCPort)
 	}
 
 	entry := map[string]any{

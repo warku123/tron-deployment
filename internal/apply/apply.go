@@ -418,8 +418,8 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		Network:    opts.Intent.Network,
 		IsPrivate:  intent.IsPrivate(opts.Intent.Network),
 		Endpoints: map[string]string{
-			"http": fmt.Sprintf("http://127.0.0.1:%d", node.Ports.HTTP),
-			"grpc": fmt.Sprintf("127.0.0.1:%d", node.Ports.GRPC),
+			"http": fmt.Sprintf("http://%s:%d", target.EndpointHost(opts.Intent.Target.Type, opts.Intent.Target.Host), node.Ports.HTTP),
+			"grpc": fmt.Sprintf("%s:%d", target.EndpointHost(opts.Intent.Target.Type, opts.Intent.Target.Host), node.Ports.GRPC),
 		},
 		DurationMs:          deployedMs,
 		Build:               buildSummary,
@@ -562,6 +562,7 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 	}
 
 	ports := opts.Intent.Nodes[0].Ports
+	host := target.EndpointHost(opts.Intent.Target.Type, opts.Intent.Target.Host)
 	return &Result{
 		Name:       opts.Intent.Name,
 		Outcome:    "no_change",
@@ -572,24 +573,24 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 		Network:    opts.Intent.Network,
 		IsPrivate:  intent.IsPrivate(opts.Intent.Network),
 		Endpoints: map[string]string{
-			"http": fmt.Sprintf("http://127.0.0.1:%d", ports.HTTP),
-			"grpc": fmt.Sprintf("127.0.0.1:%d", ports.GRPC),
+			"http": fmt.Sprintf("http://%s:%d", host, ports.HTTP),
+			"grpc": fmt.Sprintf("%s:%d", host, ports.GRPC),
 		},
 		DurationMs:          time.Since(start).Milliseconds(),
 		Build:               buildSummary,
-		MonitoringEndpoints: monitoringEndpointsFromExisting(opts.Existing),
+		MonitoringEndpoints: monitoringEndpointsFromExisting(opts.Existing, host),
 	}
 }
 
 // monitoringEndpointsFromExisting returns monitoring URLs from a managed
 // node's saved state, if monitoring was deployed for it.
-func monitoringEndpointsFromExisting(existing *state.ManagedNode) map[string]string {
+func monitoringEndpointsFromExisting(existing *state.ManagedNode, host string) map[string]string {
 	if existing == nil || existing.Monitoring == nil || !existing.Monitoring.Enabled {
 		return nil
 	}
 	return map[string]string{
-		"prometheus_url": fmt.Sprintf("http://127.0.0.1:%d", existing.Monitoring.PrometheusPort),
-		"grafana_url":    fmt.Sprintf("http://127.0.0.1:%d", existing.Monitoring.GrafanaPort),
+		"prometheus_url": fmt.Sprintf("http://%s:%d", host, existing.Monitoring.PrometheusPort),
+		"grafana_url":    fmt.Sprintf("http://%s:%d", host, existing.Monitoring.GrafanaPort),
 	}
 }
 

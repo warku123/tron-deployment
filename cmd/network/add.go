@@ -246,8 +246,8 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		"network": addNetworkName,
 		"added":   nodeName,
 		"endpoints": map[string]string{
-			"http": fmt.Sprintf("http://127.0.0.1:%d", node.Ports.HTTP),
-			"grpc": fmt.Sprintf("127.0.0.1:%d", node.Ports.GRPC),
+			"http": fmt.Sprintf("http://%s:%d", target.EndpointHost(parsed.Target.Type, parsed.Target.Host), node.Ports.HTTP),
+			"grpc": fmt.Sprintf("%s:%d", target.EndpointHost(parsed.Target.Type, parsed.Target.Host), node.Ports.GRPC),
 		},
 	}
 	output.WriteJSON(os.Stdout, result)
