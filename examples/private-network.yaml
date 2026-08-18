@@ -31,7 +31,10 @@ nodes:
     resources:
       memory: 8GB
     ports:
-      http: 8091
+      # Host http must dodge the witness's 8090 — but NOT 8091/8092: those are
+      # java-tron's in-container solidityPort/PBFTPort defaults, and the 1:1
+      # port mapping would collide with them (trond rejects such intents).
+      http: 8095
       grpc: 50052
       jsonrpc: 8545
       p2p: 18889

@@ -176,6 +176,9 @@ func RenderHOCONWithSecrets(templateDir string, i *intent.Intent, node *intent.N
 	// 1. Targeted line-level rewrites.
 	config = applyPortOverrides(config, node)
 	config = applyFeatureOverrides(config, node)
+	if err := checkHTTPPortConflicts(config, node); err != nil {
+		return Rendered{}, err
+	}
 
 	// Monitoring: auto-enable prometheus metrics in HOCON.
 	if i.Monitoring != nil && i.Monitoring.Enabled != nil && *i.Monitoring.Enabled {
@@ -197,6 +200,30 @@ func RenderHOCONWithSecrets(templateDir string, i *intent.Intent, node *intent.N
 		Redacted:   ap.redacted,
 		deploy:     config + "\n" + ap.deploy,
 	}, nil
+}
+
+// ValidateIntentHTTPPortConflicts performs the same check early, but only
+// when the intent explicitly sets HTTP port. Defaults and auto_ports are
+// left to the authoritative render-time check.
+func ValidateIntentHTTPPortConflicts(templateDir string, parsed, raw *intent.Intent) error {
+	if raw.Target.AutoPorts {
+		return nil
+	}
+	data, err := LoadTemplate(templateDir, parsed.Network)
+	if err != nil {
+		return err
+	}
+	for idx := range raw.Nodes {
+		if raw.Nodes[idx].Ports.HTTP == 0 {
+			continue
+		}
+		node := parsed.Nodes[idx]
+		config := applyPortOverrides(string(data), &node)
+		if err := checkHTTPPortConflicts(config, &node); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // hoconAppendix is the "trond overrides" block in its two forms. The
@@ -446,6 +473,50 @@ func applyPortOverrides(config string, node *intent.NodeSpec) string {
 	}
 
 	return config
+}
+
+// checkHTTPPortConflicts rejects collisions among the HTTP services that are
+// rendered by the template. Explicit config_overrides are applied in the
+// appendix and therefore remain authoritative; an operator who explicitly
+// sets a colliding key has taken responsibility for that configuration.
+func checkHTTPPortConflicts(config string, node *intent.NodeSpec) error {
+	full, fullOK := hoconPortValue(config, "fullNodePort")
+	solidity, solidityOK := hoconPortValue(config, "solidityPort")
+	pbft, pbftOK := hoconPortValue(config, "PBFTPort")
+	if !fullOK {
+		return nil
+	}
+	if solidityOK && full == solidity && !hasHTTPOverride(node, "solidityPort") {
+		return fmt.Errorf("rendered HTTP port conflict: fullNodePort=%d collides with solidityPort (in-container). Set ports.solidity_http in the intent (or config_overrides \"node.http.solidityPort\") to a different port", full)
+	}
+	if pbftOK && full == pbft && !hasHTTPOverride(node, "PBFTPort") {
+		return fmt.Errorf("rendered HTTP port conflict: fullNodePort=%d collides with PBFTPort (in-container). Set config_overrides \"node.http.PBFTPort\" to a different port", full)
+	}
+	return nil
+}
+
+func hasHTTPOverride(node *intent.NodeSpec, key string) bool {
+	_, ok := node.ConfigOverrides["node.http."+key]
+	return ok
+}
+
+// hoconPortValue returns the first active integer assignment for key. Port
+// names occur in both HTTP and RPC sections; the first occurrence is the HTTP
+// template value, matching replaceHOCONValue's existing behavior.
+func hoconPortValue(config, key string) (int, bool) {
+	for _, line := range strings.Split(config, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") ||
+			(!strings.HasPrefix(trimmed, key+" =") && !strings.HasPrefix(trimmed, key+"=")) {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, key+" ="), key+"="))
+		var port int
+		if _, err := fmt.Sscanf(value, "%d", &port); err == nil {
+			return port, true
+		}
+	}
+	return 0, false
 }
 
 // applyFeatureOverrides enables/disables features in the HOCON config.

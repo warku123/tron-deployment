@@ -54,6 +54,96 @@ func TestRenderHOCON_PortOverrides(t *testing.T) {
 	}
 }
 
+func TestRenderHOCON_HTTPPortCollisionAvoidance(t *testing.T) {
+	base := &intent.Intent{Name: "ports", Network: "mainnet", Target: intent.Target{Type: "local"}}
+	for _, tt := range []struct {
+		name       string
+		http       int
+		messageHas string
+	}{{"solidity default collision", 8091, "ports.solidity_http"}, {"PBFT default collision", 8092, "node.http.PBFTPort"}} {
+		t.Run(tt.name, func(t *testing.T) {
+			node := &intent.NodeSpec{Type: "fullnode", Ports: intent.PortMapping{HTTP: tt.http}}
+			_, err := RenderHOCON("", base, node)
+			if err == nil || !strings.Contains(err.Error(), tt.messageHas) || !strings.Contains(err.Error(), "different port") {
+				t.Fatalf("expected actionable collision error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestRenderHOCON_HTTPPortCollisionExplicitSolidity(t *testing.T) {
+	// config_overrides is the explicit escape hatch for operators who
+	// intentionally need the equal value.
+	node := &intent.NodeSpec{Type: "fullnode", Ports: intent.PortMapping{HTTP: 8091, SolidityHTTP: 8091}}
+	out, err := RenderHOCON("", &intent.Intent{Name: "ports", Network: "mainnet"}, node)
+	if err == nil || !strings.Contains(err.Error(), "solidityPort") {
+		t.Fatalf("expected solidity collision error, got %v", err)
+	}
+
+	node.ConfigOverrides = map[string]any{"node.http.solidityPort": 8091}
+	out, err = RenderHOCON("", &intent.Intent{Name: "ports", Network: "mainnet"}, node)
+	if err != nil {
+		t.Fatalf("render with override: %v", err)
+	}
+	if !strings.Contains(out, "solidityPort = 8091") {
+		t.Error("config_overrides solidity port escape hatch was changed")
+	}
+}
+
+func TestRenderHOCON_HTTPPortCollisionThroughIntentParse(t *testing.T) {
+	data := []byte(`name: pipeline-port-test
+target:
+  type: local
+  runtime: docker
+network: mainnet
+nodes:
+  - type: fullnode
+    version: latest
+    ports:
+      http: 8091
+`)
+	i, err := intent.Parse(data)
+	if err != nil {
+		t.Fatalf("parse intent: %v", err)
+	}
+	if i.Nodes[0].Ports.SolidityHTTP != 8091 {
+		t.Fatalf("ApplyDefaults did not fill solidity HTTP port: %d", i.Nodes[0].Ports.SolidityHTTP)
+	}
+
+	if _, err := RenderHOCON("", i, &i.Nodes[0]); err == nil || !strings.Contains(err.Error(), "solidityPort") {
+		t.Fatalf("expected parsed collision error, got %v", err)
+	}
+}
+
+func TestHTTPPortCollisionCheck(t *testing.T) {
+	config := "fullNodePort = 65534\nsolidityPort = 65534\nPBFTPort = 65534\n"
+	node := &intent.NodeSpec{Type: "fullnode"}
+	if err := checkHTTPPortConflicts(config, node); err == nil {
+		t.Fatal("expected collision error")
+	}
+	if err := checkHTTPPortConflicts("fullNodePort = 8090\n", node); err != nil {
+		t.Fatalf("missing service keys should not error: %v", err)
+	}
+	if err := checkHTTPPortConflicts(config, &intent.NodeSpec{ConfigOverrides: map[string]any{
+		"node.http.solidityPort": 65534,
+		"node.http.PBFTPort":     65534,
+	}}); err != nil {
+		t.Fatalf("explicit override should suppress error: %v", err)
+	}
+}
+
+func TestRenderHOCON_DefaultHTTPPortsUnchanged(t *testing.T) {
+	out, err := RenderHOCON("", &intent.Intent{Name: "ports", Network: "mainnet"}, &intent.NodeSpec{Type: "fullnode"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	for _, want := range []string{"fullNodePort = 8090", "solidityPort = 8091", "PBFTPort = 8092"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("default port missing or changed: %s", want)
+		}
+	}
+}
+
 // TestRenderHOCON_JSONRPCPortAndEnable locks down the #165 fix:
 // features.jsonrpc=true + ports.jsonrpc=NNNNN must produce BOTH
 // `httpFullNodeEnable = true` (already worked) AND
