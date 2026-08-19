@@ -75,13 +75,13 @@ func TestRenderHOCON_HTTPPortCollisionExplicitSolidity(t *testing.T) {
 	// config_overrides is the explicit escape hatch for operators who
 	// intentionally need the equal value.
 	node := &intent.NodeSpec{Type: "fullnode", Ports: intent.PortMapping{HTTP: 8091, SolidityHTTP: 8091}}
-	out, err := RenderHOCON("", &intent.Intent{Name: "ports", Network: "mainnet"}, node)
+	_, err := RenderHOCON("", &intent.Intent{Name: "ports", Network: "mainnet"}, node)
 	if err == nil || !strings.Contains(err.Error(), "solidityPort") {
 		t.Fatalf("expected solidity collision error, got %v", err)
 	}
 
 	node.ConfigOverrides = map[string]any{"node.http.solidityPort": 8091}
-	out, err = RenderHOCON("", &intent.Intent{Name: "ports", Network: "mainnet"}, node)
+	out, err := RenderHOCON("", &intent.Intent{Name: "ports", Network: "mainnet"}, node)
 	if err != nil {
 		t.Fatalf("render with override: %v", err)
 	}
