@@ -59,7 +59,7 @@ func (r *JarRuntime) Deploy(ctx context.Context, opts DeployOpts) error {
 	// Write config file. Tracked: systemd has no idea this file exists,
 	// and java-tron parses it once at JVM startup.
 	configPath := filepath.Join(installPath, "config.conf")
-	if err := tracker.write(ctx, configPath, opts.ConfigData, 0644); err != nil {
+	if err := tracker.write(ctx, configPath, opts.ConfigData, 0600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 

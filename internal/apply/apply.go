@@ -258,6 +258,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 	// intent hash alone (legacy behavior preserved).
 	if node.Build == nil &&
 		opts.Existing != nil && opts.Existing.IntentHash == opts.IntentHash {
+		remediateJarConfigPermissions(ctx, opts, node)
 		return noChangeResult(opts, nil, start), nil
 	}
 
@@ -278,6 +279,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		opts.Existing.IntentHash == opts.IntentHash &&
 		buildSummary != nil &&
 		opts.Existing.BuildCacheKey == buildSummary.CacheKey {
+		remediateJarConfigPermissions(ctx, opts, node)
 		return noChangeResult(opts, buildSummary, start), nil
 	}
 
@@ -446,6 +448,19 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		}
 	}
 	return res, nil
+}
+
+func remediateJarConfigPermissions(ctx context.Context, opts Options, node *intent.NodeSpec) {
+	if opts.Existing == nil || opts.Existing.Runtime != "jar" || node == nil || node.InstallPath == "" {
+		return
+	}
+	perms, ok := opts.Target.(target.Permissions)
+	if !ok {
+		return
+	}
+	// Best effort preserves the existing no_change result contract. Failure
+	// observability belongs in a future warnings/audit contract, not this AUD.
+	_ = perms.Chmod(ctx, filepath.Join(node.InstallPath, "config.conf"), 0o600)
 }
 
 // recordedNode returns the managed node this apply would replace, i.e. the

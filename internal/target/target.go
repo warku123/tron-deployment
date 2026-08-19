@@ -121,7 +121,8 @@ type Target interface {
 	// ReadFile reads a file from the target.
 	ReadFile(ctx context.Context, path string) ([]byte, error)
 
-	// WriteFile writes data to a file on the target.
+	// WriteFile writes data to a file on the target. It must enforce perm on
+	// both newly-created and existing files before writing their contents.
 	WriteFile(ctx context.Context, path string, data []byte, perm os.FileMode) error
 
 	// DiskFree returns available disk space in bytes at the given path.
@@ -151,4 +152,10 @@ type Target interface {
 
 	// String returns a human-readable description of the target.
 	String() string
+}
+
+// Permissions is an optional target capability for tightening an existing
+// file without rewriting its contents.
+type Permissions interface {
+	Chmod(ctx context.Context, path string, perm os.FileMode) error
 }

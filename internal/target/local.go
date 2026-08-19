@@ -115,7 +115,11 @@ func (t *LocalTarget) CommandExists(_ context.Context, name string) bool {
 var _ Target = (*LocalTarget)(nil)
 
 func (t *LocalTarget) Download(_ context.Context, remotePath, localPath string) error {
-	return copyFile(remotePath, localPath)
+	data, err := os.ReadFile(remotePath)
+	if err != nil {
+		return err
+	}
+	return writeFile(localPath, data, 0o600)
 }
 
 func (t *LocalTarget) ReadFile(_ context.Context, path string) ([]byte, error) {
@@ -123,7 +127,11 @@ func (t *LocalTarget) ReadFile(_ context.Context, path string) ([]byte, error) {
 }
 
 func (t *LocalTarget) WriteFile(_ context.Context, path string, data []byte, perm os.FileMode) error {
-	return os.WriteFile(path, data, perm)
+	return writeFile(path, data, perm)
+}
+
+func (t *LocalTarget) Chmod(_ context.Context, path string, perm os.FileMode) error {
+	return os.Chmod(path, perm)
 }
 
 func (t *LocalTarget) DiskFree(ctx context.Context, path string) (uint64, error) {
@@ -220,4 +228,32 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+// writeFile enforces permissions before truncating an existing file, so
+// sensitive contents are never written while the old mode remains active.
+func writeFile(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Truncate(0); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// WriteLocalFile securely writes a local destination, enforcing permissions
+// before truncating existing contents. Used for downloaded files too.
+func WriteLocalFile(path string, data []byte, perm os.FileMode) error {
+	return writeFile(path, data, perm)
 }

@@ -409,7 +409,7 @@ func (t *SSHTarget) Download(ctx context.Context, remotePath, localPath string) 
 		return err
 	}
 
-	return os.WriteFile(localPath, data, 0644)
+	return writeFile(localPath, data, 0o600)
 }
 
 func (t *SSHTarget) ReadFile(ctx context.Context, path string) ([]byte, error) {
@@ -418,6 +418,14 @@ func (t *SSHTarget) ReadFile(ctx context.Context, path string) ([]byte, error) {
 
 func (t *SSHTarget) WriteFile(ctx context.Context, path string, data []byte, perm os.FileMode) error {
 	return t.writeRemoteFile(ctx, path, data, perm)
+}
+
+func (t *SSHTarget) Chmod(ctx context.Context, path string, perm os.FileMode) error {
+	if err := security.ValidateCommand("chmod"); err != nil {
+		return err
+	}
+	_, err := t.Exec(ctx, "chmod", fmt.Sprintf("%o", perm), path)
+	return err
 }
 
 func (t *SSHTarget) DiskFree(ctx context.Context, path string) (uint64, error) {
@@ -490,8 +498,8 @@ func (t *SSHTarget) writeRemoteFile(ctx context.Context, path string, data []byt
 
 	quotedPath := shellQuote(path)
 	quotedDir := shellQuote(filepath.Dir(path))
-	cmd := fmt.Sprintf("mkdir -p %s && tee %s > /dev/null && chmod %o %s",
-		quotedDir, quotedPath, perm, quotedPath)
+	cmd := fmt.Sprintf("umask 077 && mkdir -p %s && if test -e %s; then chmod %o %s; fi && tee %s > /dev/null && chmod %o %s",
+		quotedDir, quotedPath, perm, quotedPath, quotedPath, perm, quotedPath)
 
 	done := make(chan error, 1)
 	go func() { done <- session.Run(cmd) }()
