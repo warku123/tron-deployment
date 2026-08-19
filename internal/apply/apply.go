@@ -318,6 +318,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		ConfigData: []byte(hocon),
 		EnvVars:    opts.EnvVars,
 	}
+	artifactSHA256 := ""
 
 	switch runtimeType {
 	case "docker":
@@ -348,6 +349,9 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		// JarPath still points at the install_path location for `mkdir -p` /
 		// config layout; only the systemd ExecStart references jarPath above.
 		deployOpts.JarPath = filepath.Join(node.InstallPath, "FullNode.jar")
+		if opts.Existing != nil {
+			deployOpts.ArtifactSHA256 = opts.Existing.ArtifactSHA256
+		}
 		if node.Jar != nil {
 			deployOpts.JarURL = node.Jar.URL
 			deployOpts.JarSHA256 = node.Jar.SHA256
@@ -355,6 +359,9 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		rt := runtime.NewJarRuntime(opts.Target)
 		if err := rt.Deploy(ctx, deployOpts); err != nil {
 			return nil, fmt.Errorf("jar deploy: %w", err)
+		}
+		if digest, err := opts.Target.Sha256IfExists(ctx, deployOpts.JarPath); err == nil {
+			artifactSHA256 = digest
 		}
 	default:
 		return nil, fmt.Errorf("unsupported runtime %q", runtimeType)
@@ -365,11 +372,12 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 
 	// Persist into state.
 	managed := state.ManagedNode{
-		Name:       opts.Intent.Name,
-		IntentHash: opts.IntentHash,
-		ConfigHash: configHash,
-		Version:    node.Version,
-		Network:    opts.Intent.Network,
+		Name:           opts.Intent.Name,
+		IntentHash:     opts.IntentHash,
+		ConfigHash:     configHash,
+		Version:        node.Version,
+		ArtifactSHA256: artifactSHA256,
+		Network:        opts.Intent.Network,
 		Target: state.NodeTarget{
 			Type:         opts.Intent.Target.Type,
 			Host:         opts.Intent.Target.Host,

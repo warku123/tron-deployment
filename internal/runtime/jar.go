@@ -32,16 +32,32 @@ func (r *JarRuntime) Deploy(ctx context.Context, opts DeployOpts) error {
 		return fmt.Errorf("create install dir: %w", err)
 	}
 
-	// Download jar if URL provided and jar not yet present
+	tracker := newChangeTracker(r.target)
+	// Apply skips a pinned artifact already installed; upgrades download first.
 	if opts.JarURL != "" {
-		if err := r.downloadJar(ctx, opts.JarURL, opts.JarPath, opts.JarSHA256); err != nil {
-			return fmt.Errorf("download jar: %w", err)
+		before, err := r.target.Sha256IfExists(ctx, opts.JarPath)
+		if err != nil {
+			return fmt.Errorf("hash existing jar: %w", err)
+		}
+		if opts.JarSHA256 != "" && before == opts.JarSHA256 && before == opts.ArtifactSHA256 {
+			// The artifact and recorded state agree: clean no-op.
+		} else {
+			// A matching file with missing/stale state may represent an
+			// interrupted deploy. Reinstall and restart so the process converges.
+			staleArtifactState := opts.JarSHA256 != "" && before == opts.JarSHA256
+			if err := r.downloadJar(ctx, opts.JarURL, opts.JarPath, opts.JarSHA256); err != nil {
+				return fmt.Errorf("download jar: %w", err)
+			}
+			after, err := r.target.Sha256IfExists(ctx, opts.JarPath)
+			if err != nil {
+				return fmt.Errorf("hash installed jar: %w", err)
+			}
+			tracker.changed = before != after || staleArtifactState
 		}
 	}
 
 	// Write config file. Tracked: systemd has no idea this file exists,
 	// and java-tron parses it once at JVM startup.
-	tracker := newChangeTracker(r.target)
 	configPath := filepath.Join(installPath, "config.conf")
 	if err := tracker.write(ctx, configPath, opts.ConfigData, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)
@@ -106,6 +122,11 @@ func (r *JarRuntime) Deploy(ctx context.Context, opts DeployOpts) error {
 	}
 
 	return nil
+}
+
+// ArtifactSHA256 returns the digest of a deployed JAR.
+func (r *JarRuntime) ArtifactSHA256(ctx context.Context, path string) (string, error) {
+	return r.target.Sha256IfExists(ctx, path)
 }
 
 func (r *JarRuntime) Start(ctx context.Context, name string) error {
@@ -217,32 +238,34 @@ func (r *JarRuntime) Logs(ctx context.Context, name string, opts LogOpts) (io.Re
 
 // downloadJar downloads the jar file and verifies its SHA256 hash.
 func (r *JarRuntime) downloadJar(ctx context.Context, url, destPath, expectedSHA256 string) error {
-	// Check if jar already exists with correct hash
-	if expectedSHA256 != "" {
-		out, err := r.target.Exec(ctx, "sha256sum", destPath)
-		if err == nil {
-			fields := strings.Fields(string(out))
-			if len(fields) > 0 && fields[0] == expectedSHA256 {
-				return nil // Already downloaded and verified
-			}
-		}
-	}
-
-	// Download
-	if _, err := r.target.Exec(ctx, "curl", "-fSL", "-o", destPath, url); err != nil {
+	// Download to a temporary path so a failed transfer or checksum never
+	// destroys the currently running artifact.
+	tmpPath := destPath + ".upgrade.tmp"
+	if _, err := r.target.Exec(ctx, "curl", "-fSL", "-o", tmpPath, url); err != nil {
+		_, _ = r.target.Exec(ctx, "rm", "-f", tmpPath)
 		return fmt.Errorf("download %s: %w", url, err)
 	}
 
 	// Verify hash
 	if expectedSHA256 != "" {
-		out, err := r.target.Exec(ctx, "sha256sum", destPath)
+		out, err := r.target.Exec(ctx, "sha256sum", tmpPath)
 		if err != nil {
+			_, _ = r.target.Exec(ctx, "rm", "-f", tmpPath)
 			return fmt.Errorf("sha256sum: %w", err)
 		}
 		fields := strings.Fields(string(out))
-		if len(fields) == 0 || fields[0] != expectedSHA256 {
+		if len(fields) == 0 {
+			_, _ = r.target.Exec(ctx, "rm", "-f", tmpPath)
+			return fmt.Errorf("SHA256 verification returned no digest; expected %s", expectedSHA256)
+		}
+		if fields[0] != expectedSHA256 {
+			_, _ = r.target.Exec(ctx, "rm", "-f", tmpPath)
 			return fmt.Errorf("SHA256 mismatch: expected %s, got %s", expectedSHA256, fields[0])
 		}
+	}
+	if _, err := r.target.Exec(ctx, "mv", tmpPath, destPath); err != nil {
+		_, _ = r.target.Exec(ctx, "rm", "-f", tmpPath)
+		return fmt.Errorf("install downloaded jar: %w", err)
 	}
 
 	return nil
