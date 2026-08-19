@@ -190,7 +190,7 @@ func readNodeConfResource(ctx context.Context, req *mcp.ReadResourceRequest) (*m
 		Contents: []*mcp.ResourceContents{{
 			URI:      req.Params.URI,
 			MIMEType: "text/plain",
-			Text:     live,
+			Text:     redactLiveConfigForMCP(live),
 		}},
 	}, nil
 }

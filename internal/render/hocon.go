@@ -105,7 +105,8 @@ func IsWitnessKeyLine(line string) bool {
 	if !ok {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimLeft(rest, " \t"), "=")
+	separator := strings.TrimLeft(rest, " \t")
+	return strings.HasPrefix(separator, "=") || strings.HasPrefix(separator, ":")
 }
 
 // RedactWitnessLine returns line unchanged unless it is a witness

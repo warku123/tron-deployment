@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/tronprotocol/tron-deployment/internal/render"
 	"github.com/tronprotocol/tron-deployment/internal/state"
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
@@ -26,4 +28,15 @@ func readLiveConfigForMCP(ctx context.Context, tgt target.Target, node *state.Ma
 		return "", fmt.Errorf("docker exec cat: %w", err)
 	}
 	return string(out), nil
+}
+
+// redactLiveConfigForMCP applies the existing display redaction before a
+// complete live config crosses the MCP boundary. Raw reads remain available
+// to comparison code, which must detect witness-key rotation.
+func redactLiveConfigForMCP(config string) string {
+	lines := strings.Split(config, "\n")
+	for i, line := range lines {
+		lines[i] = render.RedactWitnessLine(line)
+	}
+	return strings.Join(lines, "\n")
 }
