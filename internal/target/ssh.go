@@ -35,6 +35,8 @@ type SSHTarget struct {
 	client         *ssh.Client
 }
 
+var sshNetDialContext = (&net.Dialer{}).DialContext
+
 func (t *SSHTarget) DialContext(_ context.Context, network, addr string) (net.Conn, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -71,8 +73,19 @@ func (t *SSHTarget) WithKnownHosts(path string) *SSHTarget {
 	return t
 }
 
-// Connect establishes the SSH connection, verifying the server's host key.
+// Connect establishes the SSH connection, verifying the server's host key,
+// with a two-minute deadline.
+// It bounds TCP connect and SSH handshake at two minutes.
 func (t *SSHTarget) Connect() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return t.ConnectContext(ctx)
+}
+
+// ConnectContext establishes SSH while honoring cancellation during both TCP
+// connect and SSH handshake. Callers with a bounded operation should use this
+// method; Connect supplies a two-minute context.
+func (t *SSHTarget) ConnectContext(ctx context.Context) error {
 	identityPath, err := expandHome(t.identityFile)
 	if err != nil {
 		return fmt.Errorf("expand identity path: %w", err)
@@ -101,14 +114,54 @@ func (t *SSHTarget) Connect() error {
 	}
 
 	addr := net.JoinHostPort(t.host, strconv.Itoa(t.port))
-	client, err := ssh.Dial("tcp", addr, config)
+	conn, err := sshNetDialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("ssh connect to %s: %w", addr, err)
 	}
-
-	t.client = client
+	type result struct {
+		client *ssh.Client
+		err    error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		cc, chans, reqs, handshakeErr := ssh.NewClientConn(conn, addr, config)
+		if handshakeErr != nil {
+			resultCh <- result{err: handshakeErr}
+			return
+		}
+		client := ssh.NewClient(cc, chans, reqs)
+		if ctx.Err() != nil {
+			_ = client.Close()
+			resultCh <- result{err: ctx.Err()}
+			return
+		}
+		resultCh <- result{client: client}
+	}()
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("ssh connect to %s: %w", addr, result.err)
+		}
+		t.client = result.client
+	case <-ctx.Done():
+		_ = conn.Close()
+		// Handshake can finish concurrently with cancellation. Drain the result
+		// and close a client created after the cancellation branch won.
+		go func() {
+			result := <-resultCh
+			if result.client != nil {
+				_ = result.client.Close()
+			}
+		}()
+		return fmt.Errorf("ssh connect to %s: %w", addr, ctx.Err())
+	}
 	return nil
 }
+
+// IsRemote marks targets whose artifacts must be downloaded by the local
+// process and uploaded over the target connection.
+func (t *SSHTarget) IsRemote() bool { return true }
 
 // hostKeyCallback returns a verifier backed by known_hosts. Falls back to
 // ~/.ssh/known_hosts when no explicit file is configured.
@@ -186,8 +239,11 @@ func (t *SSHTarget) hostKeyCallback() (ssh.HostKeyCallback, error) {
 
 // Close closes the SSH connection.
 func (t *SSHTarget) Close() error {
+	unregisterTransport(t)
 	if t.client != nil {
-		return t.client.Close()
+		err := t.client.Close()
+		t.client = nil
+		return err
 	}
 	return nil
 }

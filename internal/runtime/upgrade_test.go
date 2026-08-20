@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"strings"
@@ -44,6 +46,20 @@ type upgradeFakeTarget struct {
 }
 
 type jarUpgradeFakeTarget struct{ *fakeTarget }
+
+type remoteJarUpgradeFakeTarget struct {
+	*jarUpgradeFakeTarget
+	uploads    int
+	remotePath string
+	putErr     error
+}
+
+func (f *remoteJarUpgradeFakeTarget) IsRemote() bool { return true }
+func (f *remoteJarUpgradeFakeTarget) PutFile(ctx context.Context, localPath, remotePath string) error {
+	f.uploads++
+	f.remotePath = remotePath
+	return f.putErr
+}
 
 type failingUpgradeTarget struct {
 	*fakeTarget
@@ -212,6 +228,82 @@ func TestJarRuntimeUpgradeArtifact(t *testing.T) {
 		r.SetPurgeInstallPath("/opt/tron")
 		if _, err := r.PrepareArtifact(context.Background(), "n1", UpgradeOpts{Version: "2"}); err == nil || !strings.Contains(err.Error(), "jar URL") {
 			t.Fatal(err)
+		}
+	})
+	t.Run("ssh downloads locally and uploads", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("jar-bytes"))
+		}))
+		defer server.Close()
+		f := &remoteJarUpgradeFakeTarget{jarUpgradeFakeTarget: &jarUpgradeFakeTarget{newFakeTarget()}}
+		r := NewJarRuntime(f)
+		if err := r.downloadJar(context.Background(), server.URL, "/opt/tron/FullNode.jar", ""); err != nil {
+			t.Fatal(err)
+		}
+		if f.uploads != 1 {
+			t.Fatalf("uploads = %d, want 1", f.uploads)
+		}
+		if f.remotePath != "/opt/tron/FullNode.jar.upgrade.tmp" {
+			t.Fatalf("upload path = %q", f.remotePath)
+		}
+		if want := []string{"mv", "/opt/tron/FullNode.jar.upgrade.tmp", "/opt/tron/FullNode.jar"}; !reflect.DeepEqual(f.cmds[len(f.cmds)-1], want) {
+			t.Fatalf("final command = %v, want %v", f.cmds[len(f.cmds)-1], want)
+		}
+		for _, cmd := range f.cmds {
+			if len(cmd) > 0 && cmd[0] == "curl" {
+				t.Fatalf("remote curl used: %v", f.cmds)
+			}
+		}
+	})
+	t.Run("SHA mismatch does not upload", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("jar-bytes")) }))
+		defer server.Close()
+		f := &remoteJarUpgradeFakeTarget{jarUpgradeFakeTarget: &jarUpgradeFakeTarget{newFakeTarget()}}
+		err := NewJarRuntime(f).downloadJar(context.Background(), server.URL, "/opt/tron/FullNode.jar", strings.Repeat("0", 64))
+		if err == nil || !strings.Contains(err.Error(), "SHA256 mismatch") {
+			t.Fatalf("error = %v", err)
+		}
+		if f.uploads != 0 {
+			t.Fatalf("uploads = %d, want 0", f.uploads)
+		}
+	})
+	t.Run("oversized response does not upload", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", fmt.Sprint((512<<20)+1))
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+		f := &remoteJarUpgradeFakeTarget{jarUpgradeFakeTarget: &jarUpgradeFakeTarget{newFakeTarget()}}
+		err := NewJarRuntime(f).downloadJar(context.Background(), server.URL, "/opt/tron/FullNode.jar", "")
+		if err == nil || !strings.Contains(err.Error(), "maximum JAR size") {
+			t.Fatalf("error = %v", err)
+		}
+		if f.uploads != 0 {
+			t.Fatalf("uploads = %d, want 0", f.uploads)
+		}
+	})
+	t.Run("non-2xx response does not upload", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "no", http.StatusBadGateway) }))
+		defer server.Close()
+		f := &remoteJarUpgradeFakeTarget{jarUpgradeFakeTarget: &jarUpgradeFakeTarget{newFakeTarget()}}
+		err := NewJarRuntime(f).downloadJar(context.Background(), server.URL, "/opt/tron/FullNode.jar", "")
+		if err == nil || !strings.Contains(err.Error(), "http 502") {
+			t.Fatalf("error = %v", err)
+		}
+		if f.uploads != 0 {
+			t.Fatalf("uploads = %d, want 0", f.uploads)
+		}
+	})
+	t.Run("upload failure cleans temporary remote file", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("jar-bytes")) }))
+		defer server.Close()
+		f := &remoteJarUpgradeFakeTarget{jarUpgradeFakeTarget: &jarUpgradeFakeTarget{newFakeTarget()}, putErr: errors.New("upload failed")}
+		err := NewJarRuntime(f).downloadJar(context.Background(), server.URL, "/opt/tron/FullNode.jar", "")
+		if err == nil {
+			t.Fatal("expected upload failure")
+		}
+		if len(f.cmds) != 1 || !reflect.DeepEqual(f.cmds[0], []string{"rm", "-f", "/opt/tron/FullNode.jar.upgrade.tmp"}) {
+			t.Fatalf("cleanup commands = %v", f.cmds)
 		}
 	})
 	t.Run("download and restart", func(t *testing.T) {

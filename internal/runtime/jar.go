@@ -3,12 +3,16 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
@@ -241,6 +245,9 @@ func (r *JarRuntime) downloadJar(ctx context.Context, url, destPath, expectedSHA
 	// Download to a temporary path so a failed transfer or checksum never
 	// destroys the currently running artifact.
 	tmpPath := destPath + ".upgrade.tmp"
+	if remote, ok := r.target.(interface{ IsRemote() bool }); ok && remote.IsRemote() {
+		return r.downloadJarLocally(ctx, url, tmpPath, destPath, expectedSHA256)
+	}
 	if _, err := r.target.Exec(ctx, "curl", "-fSL", "-o", tmpPath, url); err != nil {
 		_, _ = r.target.Exec(ctx, "rm", "-f", tmpPath)
 		return fmt.Errorf("download %s: %w", url, err)
@@ -269,6 +276,73 @@ func (r *JarRuntime) downloadJar(ctx context.Context, url, destPath, expectedSHA
 	}
 
 	return nil
+}
+
+func (r *JarRuntime) downloadJarLocally(ctx context.Context, url, remoteTmp, destPath, expectedSHA256 string) error {
+	const maxJARBytes int64 = 512 << 20
+	f, err := os.CreateTemp("", "trond-jar-")
+	if err != nil {
+		return fmt.Errorf("create local download: %w", err)
+	}
+	localPath := f.Name()
+	defer os.Remove(localPath)
+	defer f.Close()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("create download request: %w", err)
+	}
+	client := &http.Client{Timeout: 10 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("download %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("download %s: http %s", url, resp.Status)
+	}
+	if resp.ContentLength > maxJARBytes {
+		return fmt.Errorf("download %s exceeds maximum JAR size of %d bytes", url, maxJARBytes)
+	}
+	if written, err := io.Copy(f, io.LimitReader(resp.Body, maxJARBytes+1)); err != nil {
+		return fmt.Errorf("save local download: %w", err)
+	} else if written > maxJARBytes {
+		return fmt.Errorf("download %s exceeds maximum JAR size of %d bytes", url, maxJARBytes)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close local download: %w", err)
+	}
+	if expectedSHA256 != "" {
+		check, err := os.Open(localPath)
+		if err != nil {
+			return err
+		}
+		h := sha256.New()
+		_, copyErr := io.Copy(h, check)
+		_ = check.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		got := fmt.Sprintf("%x", h.Sum(nil))
+		if got != expectedSHA256 {
+			return fmt.Errorf("SHA256 mismatch: expected %s, got %s", expectedSHA256, got)
+		}
+	}
+	if err := r.target.PutFile(ctx, localPath, remoteTmp); err != nil {
+		r.cleanupRemoteTmp(remoteTmp)
+		return fmt.Errorf("upload jar: %w", err)
+	}
+	if _, err := r.target.Exec(ctx, "mv", remoteTmp, destPath); err != nil {
+		r.cleanupRemoteTmp(remoteTmp)
+		return fmt.Errorf("install downloaded jar: %w", err)
+	}
+	return nil
+}
+
+func (r *JarRuntime) cleanupRemoteTmp(path string) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, _ = r.target.Exec(cleanupCtx, "rm", "-f", path)
 }
 
 // Ensure JarRuntime implements Runtime

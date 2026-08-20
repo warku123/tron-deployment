@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
+	"sync"
 	"time"
 )
 
@@ -24,9 +26,71 @@ type Dialer interface {
 func HTTPClient(t Target, timeout time.Duration) *http.Client {
 	client := &http.Client{Timeout: timeout}
 	if d, ok := t.(Dialer); ok {
-		client.Transport = &http.Transport{DialContext: d.DialContext}
+		if _, local := t.(*LocalTarget); local {
+			client.Transport = localTransport(d)
+		} else {
+			client.Transport = targetTransport(t, d)
+		}
 	}
 	return client
+}
+
+var targetTransports sync.Map
+var localTransportOnce sync.Once
+var sharedLocalTransport *http.Transport
+
+func localTransport(d Dialer) *http.Transport {
+	localTransportOnce.Do(func() {
+		sharedLocalTransport = http.DefaultTransport.(*http.Transport).Clone()
+		sharedLocalTransport.DialContext = d.DialContext
+	})
+	return sharedLocalTransport
+}
+
+func targetTransport(t Target, d Dialer) *http.Transport {
+	key := transportKey{label: t.String(), identity: targetIdentity(t)}
+	if value, ok := targetTransports.Load(key); ok {
+		return value.(*http.Transport)
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = d.DialContext
+	actual, loaded := targetTransports.LoadOrStore(key, tr)
+	if loaded {
+		tr.CloseIdleConnections()
+	}
+	return actual.(*http.Transport)
+}
+
+func unregisterTransport(t Target) {
+	key := transportKey{label: t.String(), identity: targetIdentity(t)}
+	if value, ok := targetTransports.LoadAndDelete(key); ok {
+		value.(*http.Transport).CloseIdleConnections()
+	}
+}
+
+type transportKey struct {
+	label    string
+	identity uintptr
+}
+
+func targetIdentity(t Target) uintptr {
+	v := reflect.ValueOf(t)
+	if v.IsValid() && v.Kind() == reflect.Pointer {
+		return v.Pointer()
+	}
+	return 0
+}
+
+// CloseIdleConnections releases pooled connections held by target-aware HTTP
+// transports. Long-lived callers should invoke it during shutdown.
+func CloseIdleConnections() {
+	if sharedLocalTransport != nil {
+		sharedLocalTransport.CloseIdleConnections()
+	}
+	targetTransports.Range(func(_, value any) bool {
+		value.(*http.Transport).CloseIdleConnections()
+		return true
+	})
 }
 
 // EndpointHost returns the host used when reporting a target endpoint.
