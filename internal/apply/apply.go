@@ -439,7 +439,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 	_ = builtImageTag // consumed by Phase 3 (docker runtime + image artifact)
 
 	if opts.Wait {
-		waitErr := WaitForReady(ctx, opts.Target, opts.Intent.Name, node.Ports.HTTP, opts.WaitTimeout)
+		waitErr := WaitForReady(ctx, opts.Target, opts.Intent.Name, runtimeType, node.Ports.HTTP, opts.WaitTimeout)
 		res.WaitedMs = time.Since(start).Milliseconds() - deployedMs
 		ready := waitErr == nil
 		res.Ready = &ready
