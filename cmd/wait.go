@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -184,9 +183,8 @@ func expandHTTPURL(raw string, port int) string {
 	return strings.ReplaceAll(raw, "{http}", fmt.Sprintf("http://127.0.0.1:%d", port))
 }
 
-func probeTCP(ctx context.Context, _ target.Target, port int) error {
-	d := net.Dialer{Timeout: 2 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
+func probeTCP(ctx context.Context, tgt target.Target, port int) error {
+	conn, err := target.DialContext(ctx, tgt, "tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
 	if err != nil {
 		return err
 	}
@@ -212,8 +210,16 @@ func httpProbeURL(raw string) (string, error) {
 }
 
 func probeHTTP(ctx context.Context, nc *nodeContext, url string) error {
-	args := []string{"-fsS", "--max-time", "5", url}
-	out, err := nc.runtimeExec(ctx, "curl", args...)
+	var out []byte
+	var err error
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if nc.Node.Runtime == "jar" {
+		out, err = target.Get(probeCtx, nc.Target, url, 5*time.Second)
+	} else {
+		args := []string{"-fsS", "--max-time", "5", url}
+		out, err = nc.runtimeExec(ctx, "curl", args...)
+	}
 	if err != nil {
 		return fmt.Errorf("curl: %w", err)
 	}

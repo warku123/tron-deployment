@@ -8,6 +8,7 @@ import (
 
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
+	"github.com/tronprotocol/tron-deployment/internal/render"
 )
 
 var validateExplain bool
@@ -43,13 +44,20 @@ func runValidate(cmd *cobra.Command, args []string) error {
 				"Refer to examples/ for valid intent files",
 			)
 	}
+	raw, rawErr := intent.LoadRaw(intentPath)
+	if rawErr != nil {
+		return output.NewError("VALIDATION_ERROR", output.ExitValidationError, rawErr.Error())
+	}
+	if err := render.ValidateIntentHTTPPortConflicts("", parsed, raw); err != nil {
+		return output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error()).
+			WithSuggestions(
+				"Change ports.http, or move the colliding service: ports.solidity_http for solidityPort, config_overrides \"node.http.PBFTPort\" for PBFTPort",
+				"Run config render after correcting the conflicting HTTP port",
+			)
+	}
 
 	if validateExplain {
-		// Need the raw (no-defaults) form to distinguish explicit vs default.
-		raw, rawErr := intent.LoadRaw(intentPath)
-		if rawErr != nil {
-			return output.NewError("VALIDATION_ERROR", output.ExitValidationError, rawErr.Error())
-		}
+		// The raw (no-defaults) form distinguishes explicit vs default.
 		fmt.Printf("Intent %q is valid (%s, %d node(s))\n\n", parsed.Name, parsed.Network, len(parsed.Nodes))
 		printExplain(os.Stdout, raw, parsed)
 		return nil

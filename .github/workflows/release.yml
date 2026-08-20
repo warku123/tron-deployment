@@ -1,8 +1,10 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  # Tag-triggered releases are temporarily paused (TX-167). The pipeline
+  # itself is kept intact; run it manually from the Actions tab or via
+  # `gh workflow run release.yml` when releases resume.
+  workflow_dispatch:
 
 permissions:
   contents: write

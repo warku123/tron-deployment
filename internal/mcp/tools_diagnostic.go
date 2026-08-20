@@ -14,6 +14,7 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/diagnosis"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/state"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 // registerDiagnosticTools wires up read-only triage tools. Pure-data
@@ -169,7 +170,21 @@ func healthTool(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*mcp
 	if port == 0 {
 		port = 8090
 	}
-	url := httpURL(port) + "/wallet/getnowblock"
+	// The probe URL stays on loopback: target.HTTPClient dials through the
+	// SSH tunnel, which lands on the remote host's loopback.
+	url := httpURL("127.0.0.1", port) + "/wallet/getnowblock"
+	endpoint := httpURL(target.EndpointHost(node.Target.Type, node.Target.Host), port) + "/wallet/getnowblock"
+
+	// Probe through the node's target (SSH-tunnelled for remote nodes),
+	// not via http.DefaultClient against this host's loopback — that
+	// bypassed SSH entirely and always failed for remote rigs.
+	tgt, err := mcpResolveTargetFromNode(node)
+	if err != nil {
+		return errResult(err)
+	}
+	if c, ok := any(tgt).(interface{ Close() error }); ok {
+		defer c.Close()
+	}
 
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -178,11 +193,11 @@ func healthTool(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*mcp
 		return errResult(err)
 	}
 	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := target.HTTPClient(tgt, 5*time.Second).Do(req)
 	if err != nil {
 		return jsonResult(map[string]any{
 			"name": args.Name, "healthy": false,
-			"endpoint": url, "error": err.Error(),
+			"endpoint": endpoint, "error": err.Error(),
 		})
 	}
 	defer resp.Body.Close()
@@ -190,7 +205,7 @@ func healthTool(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*mcp
 	return jsonResult(map[string]any{
 		"name":       args.Name,
 		"healthy":    healthy,
-		"endpoint":   url,
+		"endpoint":   endpoint,
 		"latency_ms": time.Since(start).Milliseconds(),
 		"status":     resp.StatusCode,
 	})

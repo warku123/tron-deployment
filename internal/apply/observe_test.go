@@ -2,6 +2,12 @@ package apply
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -21,6 +27,43 @@ func (e *execTarget) Exec(ctx context.Context, name string, args ...string) ([]b
 
 func newExecTarget(fn func(ctx context.Context, name string, args ...string) ([]byte, error)) *execTarget {
 	return &execTarget{fakeTarget: &fakeTarget{}, exec: fn}
+}
+
+// httpTarget is a fakeTarget whose DialContext redirects loopback probes to
+// a test HTTP server. Jar-runtime LiveStatus probes go through the
+// target-aware HTTP client (target.Get/Post over DialContext), so the fake
+// must serve real HTTP rather than script Exec output.
+type httpTarget struct {
+	*fakeTarget
+	server *httptest.Server
+}
+
+func (h *httpTarget) DialContext(ctx context.Context, network, _ string) (net.Conn, error) {
+	addr := strings.TrimPrefix(h.server.URL, "http://")
+	return (&net.Dialer{}).DialContext(ctx, network, addr)
+}
+
+// newHTTPStatusTarget starts an httptest server that answers the LiveStatus
+// probe endpoints and returns a target wired to it plus the port LiveStatus
+// should probe. handler may return ("", true) to fail a request.
+func newHTTPStatusTarget(t *testing.T, respond func(path string, body []byte) (string, bool)) (*httpTarget, int) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqBody, _ := io.ReadAll(r.Body)
+		out, fail := respond(r.URL.Path, reqBody)
+		if fail {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, out)
+	}))
+	t.Cleanup(srv.Close)
+	port, err := strconv.Atoi(strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse httptest port: %v", err)
+	}
+	return &httpTarget{fakeTarget: &fakeTarget{}, server: srv}, port
 }
 
 func TestLogsDescriptor_Docker(t *testing.T) {
@@ -102,17 +145,16 @@ func TestContainerID_NilTarget(t *testing.T) {
 }
 
 func TestLiveStatus_SetsHealthy(t *testing.T) {
-	node := &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: 8090}
-	tgt := newExecTarget(func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		url := args[len(args)-1]
-		switch {
-		case strings.Contains(url, "/wallet/getnowblock"):
-			return []byte(`{"block_header":{"raw_data":{"number":42,"timestamp":1}}}`), nil
-		case strings.Contains(url, "/wallet/listnodes"):
-			return []byte(`{"nodes":[{},{}]}`), nil
+	tgt, port := newHTTPStatusTarget(t, func(path string, _ []byte) (string, bool) {
+		switch path {
+		case "/wallet/getnowblock":
+			return `{"block_header":{"raw_data":{"number":42,"timestamp":1}}}`, false
+		case "/wallet/listnodes":
+			return `{"nodes":[{},{}]}`, false
 		}
-		return nil, context.DeadlineExceeded
+		return "", true
 	})
+	node := &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: port}
 	out := LiveStatus(context.Background(), tgt, node)
 	if out["healthy"] != true {
 		t.Errorf("healthy = %v, want true (RPC answered with a parseable block)", out["healthy"])
@@ -144,38 +186,47 @@ func TestIsHex64(t *testing.T) {
 func TestLiveStatus_GenesisBlockID(t *testing.T) {
 	blockJSON := `{"block_header":{"raw_data":{"number":3,"timestamp":1}}}`
 
-	mk := func(genesisBody string, genesisErr bool) *execTarget {
-		return newExecTarget(func(_ context.Context, _ string, args ...string) ([]byte, error) {
-			url := args[len(args)-1]
-			switch {
-			case strings.Contains(url, "/wallet/getblockbynum"):
+	mk := func(genesisBody string, genesisErr bool) (*httpTarget, int) {
+		return newHTTPStatusTarget(t, func(path string, _ []byte) (string, bool) {
+			switch path {
+			case "/wallet/getblockbynum":
 				if genesisErr {
-					return nil, context.DeadlineExceeded
+					return "", true
 				}
-				return []byte(genesisBody), nil
-			case strings.Contains(url, "/wallet/getnowblock"):
-				return []byte(blockJSON), nil
+				return genesisBody, false
+			case "/wallet/getnowblock":
+				return blockJSON, false
 			}
-			return nil, context.DeadlineExceeded
+			return "", true
 		})
 	}
-	node := &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: 8090}
 
 	// Valid blockID → surfaced.
-	out := LiveStatus(context.Background(), mk(`{"blockID":"`+genesisBlockID+`","block_header":{}}`, false), node)
+	tgt, port := newHTTPStatusTarget(t, func(path string, _ []byte) (string, bool) {
+		if path == "/wallet/getblockbynum" {
+			return `{"blockID":"` + genesisBlockID + `","block_header":{}}`, false
+		}
+		if path == "/wallet/getnowblock" {
+			return blockJSON, false
+		}
+		return "", true
+	})
+	out := LiveStatus(context.Background(), tgt, &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: port})
 	if out["genesis_block_id"] != genesisBlockID {
 		t.Errorf("genesis_block_id = %v, want %s", out["genesis_block_id"], genesisBlockID)
 	}
 
 	// Malformed blockID (not 64-hex) → absent.
-	out = LiveStatus(context.Background(), mk(`{"blockID":"nope"}`, false), node)
+	tgt, port = mk(`{"blockID":"nope"}`, false)
+	out = LiveStatus(context.Background(), tgt, &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: port})
 	if _, ok := out["genesis_block_id"]; ok {
 		t.Errorf("genesis_block_id must be absent for a malformed blockID; got %v", out["genesis_block_id"])
 	}
 
 	// Probe failed (node down) → absent, but the primary healthy signal
 	// (from getnowblock) is unaffected — proves it doesn't starve them.
-	out = LiveStatus(context.Background(), mk("", true), node)
+	tgt, port = mk("", true)
+	out = LiveStatus(context.Background(), tgt, &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: port})
 	if _, ok := out["genesis_block_id"]; ok {
 		t.Errorf("genesis_block_id must be absent when the probe fails; got %v", out["genesis_block_id"])
 	}
@@ -185,11 +236,10 @@ func TestLiveStatus_GenesisBlockID(t *testing.T) {
 }
 
 func TestLiveStatus_NoHealthyOnProbeFailure(t *testing.T) {
-	node := &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: 8090}
-	tgt := newExecTarget(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
-		return nil, context.DeadlineExceeded // node down: every probe fails
-	})
-	out := LiveStatus(context.Background(), tgt, node)
+	// No listener behind the target: every dial fails, so every probe errs
+	// (a node that is down behaves the same over the tunnel).
+	node := &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: 1}
+	out := LiveStatus(context.Background(), &fakeTarget{}, node)
 	if _, ok := out["healthy"]; ok {
 		t.Errorf("healthy must be absent when the probe fails (caller seeds false); got %v", out["healthy"])
 	}
@@ -201,13 +251,13 @@ func TestLiveStatus_NoHealthyOnProbeFailure(t *testing.T) {
 // not fabricate a block_height of 0.
 func TestLiveStatus_NoHealthyOnEmptyOrErrorBody(t *testing.T) {
 	for _, body := range []string{`{}`, `{"Error":"some node error"}`, `{"block_header":{"raw_data":{"number":0,"timestamp":0}}}`} {
-		node := &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: 8090}
-		tgt := newExecTarget(func(_ context.Context, _ string, args ...string) ([]byte, error) {
-			if strings.Contains(args[len(args)-1], "/wallet/getnowblock") {
-				return []byte(body), nil
+		tgt, port := newHTTPStatusTarget(t, func(path string, _ []byte) (string, bool) {
+			if path == "/wallet/getnowblock" {
+				return body, false
 			}
-			return nil, context.DeadlineExceeded
+			return "", true
 		})
+		node := &state.ManagedNode{Name: "fn0", Runtime: "jar", HTTPPort: port}
 		out := LiveStatus(context.Background(), tgt, node)
 		if _, ok := out["healthy"]; ok {
 			t.Errorf("body %q: healthy must be absent (no real block); got %v", body, out["healthy"])

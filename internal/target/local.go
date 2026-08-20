@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,10 @@ import (
 
 // LocalTarget executes commands and file operations on the local machine.
 type LocalTarget struct{}
+
+func (t *LocalTarget) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return (&net.Dialer{}).DialContext(ctx, network, addr)
+}
 
 // NewLocalTarget creates a new LocalTarget.
 func NewLocalTarget() *LocalTarget {

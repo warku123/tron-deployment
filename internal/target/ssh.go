@@ -35,6 +35,23 @@ type SSHTarget struct {
 	client         *ssh.Client
 }
 
+func (t *SSHTarget) DialContext(_ context.Context, network, addr string) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("ssh direct dial requires host:port address: %w", err)
+	}
+	if host != "localhost" {
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			return nil, fmt.Errorf("ssh direct dial address %q is not loopback", addr)
+		}
+	}
+	if t.client == nil {
+		return nil, fmt.Errorf("ssh not connected")
+	}
+	return t.client.Dial(network, addr)
+}
+
 // NewSSHTarget creates a new SSHTarget. Call Connect() before use.
 func NewSSHTarget(host string, port int, user, identityFile string) *SSHTarget {
 	if port == 0 {

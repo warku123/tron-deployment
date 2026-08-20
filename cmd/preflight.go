@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -74,6 +73,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 
 	// Memory check
 	checks = append(checks, checkMemory(cmd, tgt, parsed))
+	checks = append(checks, checkMemoryRecommended(parsed)...)
 
 	// Port check
 	for _, node := range parsed.Nodes {
@@ -197,12 +197,42 @@ func checkMemory(cmd *cobra.Command, tgt target.Target, parsed *intent.Intent) c
 		Message: fmt.Sprintf("%dGB total", memGB)}
 }
 
+// checkMemoryRecommended warns about container memory below java-tron's
+// official startup recommendation. This is an intent-side check: it does not
+// inspect the target's available memory or alter the existing memory check.
+func checkMemoryRecommended(parsed *intent.Intent) []checkResult {
+	var checks []checkResult
+	for i, node := range parsed.Nodes {
+		memoryGB := render.ParseMemoryGB(node.Resources.Memory)
+		if memoryGB <= 0 || memoryGB >= 8 {
+			continue
+		}
+		nodeName := parsed.Name
+		if len(parsed.Nodes) > 1 {
+			nodeName = fmt.Sprintf("%s-node%d", parsed.Name, i)
+		}
+		checks = append(checks, checkResult{
+			Name:    "memory-recommended",
+			Status:  "warning",
+			Message: fmt.Sprintf("node '%s' requests %s container memory, below java-tron's official minimum 8192MB (start.sh ALLOW_MIN_MEMORY); small containers risk JVM startup failure", nodeName, node.Resources.Memory),
+		})
+	}
+	if len(checks) == 0 {
+		return []checkResult{{
+			Name:    "memory-recommended",
+			Status:  "pass",
+			Message: "all nodes meet java-tron's official 8192MB minimum",
+		}}
+	}
+	return checks
+}
+
 // checkPorts probes every well-known port the intent will expose.
 // Earlier this shelled out to `ss -tlnp` which doesn't exist on macOS,
 // so the check silently reported every port as available. Use net.Dial
 // instead — same behaviour as the diagnose port_listening checker, no
 // runtime dependency.
-func checkPorts(_ *cobra.Command, _ target.Target, node *intent.NodeSpec) []checkResult {
+func checkPorts(cmd *cobra.Command, tgt target.Target, node *intent.NodeSpec) []checkResult {
 	ports := []struct {
 		name string
 		port int
@@ -212,13 +242,12 @@ func checkPorts(_ *cobra.Command, _ target.Target, node *intent.NodeSpec) []chec
 		{"p2p", node.Ports.P2P},
 	}
 
-	dialer := net.Dialer{Timeout: 1500 * time.Millisecond}
 	var results []checkResult
 	for _, p := range ports {
 		if p.port == 0 {
 			continue
 		}
-		conn, err := dialer.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", p.port))
+		conn, err := target.DialContext(cmd.Context(), tgt, "tcp", fmt.Sprintf("127.0.0.1:%d", p.port), 1500*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
 			results = append(results, checkResult{

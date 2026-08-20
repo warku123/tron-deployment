@@ -35,19 +35,25 @@ func LiveStatus(ctx context.Context, tgt target.Target, node *state.ManagedNode)
 		port = 8090
 	}
 
-	// probe issues a curl against the node's HTTP API. body=="" is a GET
-	// (TRON endpoints that take no params, e.g. getnowblock); a non-empty
-	// body is POSTed as JSON (e.g. getblockbynum needs {"num":N}).
+	// probe issues a request against the node's HTTP API. body=="" is a
+	// GET (TRON endpoints that take no params, e.g. getnowblock); a
+	// non-empty body is POSTed as JSON (e.g. getblockbynum needs
+	// {"num":N}). Jar nodes go through the target-aware HTTP client
+	// (SSH-tunnelled for remote targets); docker nodes curl inside the
+	// container via `docker exec`.
 	probe := func(path, body string) ([]byte, error) {
 		url := fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
+		if node.Runtime == "jar" {
+			if body == "" {
+				return target.Get(ctx, tgt, url, 2*time.Second)
+			}
+			return target.Post(ctx, tgt, url, []byte(body), 2*time.Second)
+		}
 		args := []string{"-fsS", "--max-time", "2"}
 		if body != "" {
 			args = append(args, "-X", "POST", "-H", "Content-Type: application/json", "-d", body)
 		}
 		args = append(args, url)
-		if node.Runtime == "jar" {
-			return tgt.Exec(ctx, "curl", args...)
-		}
 		return tgt.Exec(ctx, "docker", append([]string{"exec", node.Name, "curl"}, args...)...)
 	}
 

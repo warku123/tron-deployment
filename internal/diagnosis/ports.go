@@ -3,7 +3,6 @@ package diagnosis
 import (
 	"context"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/tronprotocol/tron-deployment/internal/target"
@@ -11,30 +10,30 @@ import (
 
 // PortsChecker verifies expected ports are accepting TCP connections.
 //
-// We probe via net.Dial against 127.0.0.1 from the host where trond is
-// running, instead of running `ss -tlnp` inside the target. This works
-// the same on Linux and macOS (the previous `ss` invocation silently
-// returned empty on Darwin, marking every port as "not listening" even
-// when java-tron was healthy and serving traffic). For docker-runtime
-// nodes, the host-side mapped port is exactly what test harnesses care
-// about reaching, so this is also the right thing semantically.
+// We dial 127.0.0.1 through the target (SSH direct-tcpip when the target
+// is remote, a plain host dial for local), instead of running `ss -tlnp`
+// inside the target. This works the same on Linux and macOS (the previous
+// `ss` invocation silently returned empty on Darwin, marking every port
+// as "not listening" even when java-tron was healthy and serving traffic).
+// For docker-runtime nodes, the host-side mapped port is exactly what test
+// harnesses care about reaching, so this is also the right thing
+// semantically.
 type PortsChecker struct{}
 
 func (c *PortsChecker) Name() string { return "port_listening" }
 
-func (c *PortsChecker) Run(ctx context.Context, _ target.Target, opts CheckOpts) CheckResult {
+func (c *PortsChecker) Run(ctx context.Context, tgt target.Target, opts CheckOpts) CheckResult {
 	ports := []int{opts.HTTPPort, opts.GRPCPort}
 	if opts.HTTPPort == 0 && opts.GRPCPort == 0 {
 		ports = []int{8090, 50051}
 	}
 
-	dialer := net.Dialer{Timeout: 1500 * time.Millisecond}
 	var missing []int
 	for _, port := range ports {
 		if port == 0 {
 			continue
 		}
-		conn, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		conn, err := target.DialContext(ctx, tgt, "tcp", fmt.Sprintf("127.0.0.1:%d", port), 1500*time.Millisecond)
 		if err != nil {
 			missing = append(missing, port)
 			continue

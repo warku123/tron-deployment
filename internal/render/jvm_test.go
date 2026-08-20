@@ -42,12 +42,53 @@ func TestCalculateHeapMax(t *testing.T) {
 		{16, "8g"},
 		{8, "4g"},
 		{4, "2g"},
+		{3, "1536m"},
+		{2, "1024m"},
+		{1, "512m"},
 	}
 	for _, c := range cases {
 		got := calculateHeapMax(c.memGB, nil)
 		if got != c.want {
 			t.Errorf("calculateHeapMax(%dGB) = %s, want %s", c.memGB, got, c.want)
 		}
+	}
+}
+
+func TestJVMArgs_HeapHeadroom(t *testing.T) {
+	cases := []struct {
+		memGB int
+		heap  string
+		new   string
+	}{
+		{2, "1024m", "256m"},
+		{1, "512m", "128m"},
+		{3, "1536m", "384m"},
+		{4, "2g", "512m"},
+		{8, "4g", "1g"},
+		{16, "8g", "2g"},
+	}
+	for _, tc := range cases {
+		got := JVMArgsString(tc.memGB, 17, nil)
+		for _, want := range []string{"-Xmx" + tc.heap, "-Xms" + tc.heap, "-Xmn" + tc.new} {
+			if !strings.Contains(got, want) {
+				t.Errorf("JVMArgs(%dGB) missing %q in %q", tc.memGB, want, got)
+			}
+		}
+	}
+}
+
+func TestJVMArgs_HeapMaxOverrideRemainsVerbatim(t *testing.T) {
+	got := JVMArgsString(2, 17, &intent.JVMConfig{HeapMax: "1536m"})
+	if !strings.Contains(got, "-Xmx1536m") || !strings.Contains(got, "-Xms1536m") {
+		t.Errorf("heap_max override not applied verbatim: %q", got)
+	}
+}
+
+func TestJVMArgs_MBMemoryInput(t *testing.T) {
+	memGB := ParseMemoryGB("2048m")
+	got := JVMArgsString(memGB, 17, nil)
+	if !strings.Contains(got, "-Xmx1024m") || !strings.Contains(got, "-Xms1024m") {
+		t.Errorf("2048m input produced unsafe heap: %q", got)
 	}
 }
 

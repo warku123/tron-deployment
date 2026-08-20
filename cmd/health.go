@@ -3,10 +3,12 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tronprotocol/tron-deployment/internal/output"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 var healthCmd = &cobra.Command{
@@ -39,7 +41,7 @@ func runHealth(cmd *cobra.Command, args []string) error {
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/wallet/getnowblock", httpPort)
 
-	out, err := nc.Target.Exec(cmd.Context(), "curl", "-s", "--max-time", "5", url)
+	out, err := target.Get(cmd.Context(), nc.Target, url, 5*time.Second)
 	if err != nil {
 		result := map[string]any{
 			"name":   name,
