@@ -165,6 +165,38 @@ func TestApply_NoChangeBackfillsStorageRoot(t *testing.T) {
 	}
 }
 
+func TestApply_NoChangeBackfillSaveFailurePropagates(t *testing.T) {
+	parsed := minimalIntent()
+	parsed.Target.Runtime = "docker"
+	parsed.Nodes[0].Storage.Data = "/srv/tron/node0/output-directory"
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	store, err := state.NewStore(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &state.DeploymentState{}
+	if err := store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+	// A directory at the state path makes the final atomic rename fail.
+	if err := os.Remove(statePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(statePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existing := state.ManagedNode{Name: parsed.Name, IntentHash: "same-hash", Runtime: "docker"}
+	res, err := Apply(context.Background(), Options{
+		Intent: parsed, Target: &fakeTarget{}, Store: store, State: st,
+		IntentHash: "same-hash", Existing: &existing,
+		DeploymentsDir: filepath.Join(dir, "deployments"),
+	})
+	if err == nil || res != nil {
+		t.Fatalf("Apply = (%v, %v), want propagated save error", res, err)
+	}
+}
+
 func TestApply_RequiresIntent(t *testing.T) {
 	if _, err := Apply(context.Background(), Options{}); err == nil {
 		t.Error("expected error when Intent is nil")

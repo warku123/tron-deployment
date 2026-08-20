@@ -85,9 +85,9 @@ func TestSaveAtomic(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	// No temp file should be left behind
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("temp file still present: %v", err)
+	// No staging file should be left behind.
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".state-*.tmp")); err != nil || len(matches) != 0 {
+		t.Errorf("temporary state files remain: matches=%v err=%v", matches, err)
 	}
 
 	// Reload and verify contents round-trip
@@ -98,6 +98,43 @@ func TestSaveAtomic(t *testing.T) {
 	}
 	if len(loaded.Nodes) != 1 || loaded.Nodes[0].Name != "atomic" {
 		t.Errorf("round-trip mismatch: %+v", loaded.Nodes)
+	}
+}
+
+func TestSave_ErrorPropagatesAndCleansTemp(t *testing.T) {
+	dir := t.TempDir()
+	// A directory at the destination makes the final rename fail.
+	path := filepath.Join(dir, "state.json")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewStore(filepath.Join(dir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(&DeploymentState{Nodes: []ManagedNode{{Name: "broken"}}}); err == nil {
+		t.Fatal("Save succeeded despite destination being a directory")
+	}
+	if matches, err := filepath.Glob(filepath.Join(dir, ".state-*.tmp")); err != nil || len(matches) != 0 {
+		t.Errorf("temporary state files remain after failure: matches=%v err=%v", matches, err)
+	}
+}
+
+func TestSave_ReplacesWithCompleteJSON(t *testing.T) {
+	s, path := newTempStore(t)
+	if err := s.Save(&DeploymentState{Nodes: []ManagedNode{{Name: "complete"}}}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loaded DeploymentState
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("final state is not complete JSON: %v", err)
+	}
+	if len(loaded.Nodes) != 1 || loaded.Nodes[0].Name != "complete" {
+		t.Fatalf("unexpected final state: %+v", loaded)
 	}
 }
 

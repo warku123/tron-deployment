@@ -69,15 +69,45 @@ func (s *Store) Save(state *DeploymentState) error {
 		return fmt.Errorf("marshal state: %w", err)
 	}
 
-	// Atomic write: write to temp file then rename
-	tmpPath := s.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+	// Save guarantees complete file contents via same-directory atomic rename.
+	// Concurrent lost-update protection is the caller's responsibility while
+	// holding state.lock (AUD-015 tracked separately).
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".state-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create state temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		cleanup()
 		return fmt.Errorf("write state temp file: %w", err)
 	}
-
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return fmt.Errorf("sync state temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close state temp file: %w", err)
+	}
 	if err := os.Rename(tmpPath, s.path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename state file: %w", err)
+	}
+	// Sync the directory entry so a crash after rename cannot lose the name.
+	dir, err := os.Open(filepath.Dir(s.path))
+	if err != nil {
+		return fmt.Errorf("open state directory: %w", err)
+	}
+	if err := dir.Sync(); err != nil {
+		_ = dir.Close()
+		return fmt.Errorf("sync state directory: %w", err)
+	}
+	if err := dir.Close(); err != nil {
+		return fmt.Errorf("close state directory: %w", err)
 	}
 
 	return nil

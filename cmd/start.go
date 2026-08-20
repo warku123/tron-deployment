@@ -16,6 +16,9 @@ var startCmd = &cobra.Command{
 	RunE:  runStart,
 }
 
+var saveStartState = func(nc *nodeContext) error { return nc.SaveState() }
+var resolveStartNodeContext = resolveNodeContext
+
 func init() {
 	rootCmd.AddCommand(startCmd)
 }
@@ -28,7 +31,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	nc, err := resolveNodeContext(name)
+	nc, err := resolveStartNodeContext(name)
 	if err != nil {
 		return err
 	}
@@ -41,9 +44,19 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	nc.Node.Status = "running"
-	nc.SaveState()
+	if err := persistStartState(name, nc, start); err != nil {
+		return err
+	}
 	writeAudit(auditEvent{Command: "start", Node: name, Target: nc.Target.String(), Result: "success", Start: start})
 
 	writeResult(map[string]any{"name": name, "status": "running"})
+	return nil
+}
+
+func persistStartState(name string, nc *nodeContext, start time.Time) error {
+	if err := saveStartState(nc); err != nil {
+		writeAudit(auditEvent{Command: "start", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "STATE_ERROR", Start: start})
+		return exitWithError("STATE_ERROR", output.ExitGeneralError, fmt.Sprintf("Failed to persist %s state: %v", name, err))
+	}
 	return nil
 }

@@ -25,6 +25,15 @@ type autoHealArgs struct {
 	DryRun bool   `json:"dry_run,omitempty" jsonschema:"if true, propose actions without executing"`
 }
 
+// Kept as a tiny seam for the state-save failure contract; production uses
+// Store.Save directly, while tests can exercise result handling without
+// requiring a live Docker/systemd runtime.
+var saveHealState = func(store *state.Store, st *state.DeploymentState) error {
+	return store.Save(st)
+}
+
+var runHealAction = mcpRunHealAction
+
 func registerHealTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "auto_heal",
@@ -118,7 +127,7 @@ func autoHealTool(ctx context.Context, _ *mcp.CallToolRequest, args autoHealArgs
 			})
 			continue
 		}
-		err := mcpRunHealAction(ctx, tgt, node, action)
+		err := runHealAction(ctx, tgt, node, action)
 		entry := map[string]any{
 			"check":  r.Name,
 			"action": action.action,
@@ -132,7 +141,9 @@ func autoHealTool(ctx context.Context, _ *mcp.CallToolRequest, args autoHealArgs
 			entry["message"] = action.message
 			node.Status = "running"
 			store.UpsertNode(st, *node)
-			_ = store.Save(st)
+			if saveErr := saveHealState(store, st); saveErr != nil {
+				recordHealStateSaveFailure(saveErr, entry, r, &stillFailing)
+			}
 		}
 		healed = append(healed, entry)
 	}
@@ -144,6 +155,15 @@ func autoHealTool(ctx context.Context, _ *mcp.CallToolRequest, args autoHealArgs
 		"skipped":       skipped,
 		"still_failing": stillFailing,
 	})
+}
+
+func recordHealStateSaveFailure(err error, entry map[string]any, check diagnosis.CheckResult, stillFailing *[]diagnosis.CheckResult) {
+	if err == nil {
+		return
+	}
+	entry["result"] = "failed"
+	entry["message"] = "state save failed: " + err.Error()
+	*stillFailing = append(*stillFailing, check)
 }
 
 type mcpHealAction struct {

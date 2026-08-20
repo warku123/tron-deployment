@@ -24,6 +24,8 @@ On failure, automatically rolls back to the previous version.`,
 	RunE: runUpgrade,
 }
 
+var saveUpgradeState = func(nc *nodeContext) error { return nc.SaveState() }
+
 func init() {
 	upgradeCmd.Flags().StringVar(&upgradeVersion, "version", "", "Target version (required)")
 	upgradeCmd.Flags().StringVar(&upgradeJarURL, "jar-url", "", "Target-version JAR URL (jar runtime)")
@@ -93,7 +95,9 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	nc.Node.PreviousVersion = previousVersion
 	nc.Node.Version = upgradeVersion
 	nc.Node.Status = "running"
-	nc.SaveState()
+	if err := persistUpgradeState(name, nc, start); err != nil {
+		return err
+	}
 	writeAudit(auditEvent{Command: "upgrade", Node: name, Target: nc.Target.String(), Result: "success", Start: start})
 
 	writeResult(map[string]any{
@@ -102,6 +106,14 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		"version":          upgradeVersion,
 		"previous_version": previousVersion,
 	})
+	return nil
+}
+
+func persistUpgradeState(name string, nc *nodeContext, start time.Time) error {
+	if err := saveUpgradeState(nc); err != nil {
+		writeAudit(auditEvent{Command: "upgrade", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "STATE_ERROR", Start: start})
+		return exitWithError("STATE_ERROR", output.ExitGeneralError, fmt.Sprintf("Failed to persist %s state: %v", name, err))
+	}
 	return nil
 }
 

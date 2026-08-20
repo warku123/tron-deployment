@@ -16,6 +16,8 @@ var restartCmd = &cobra.Command{
 	RunE:  runRestart,
 }
 
+var saveRestartState = func(nc *nodeContext) error { return nc.SaveState() }
+
 func init() {
 	rootCmd.AddCommand(restartCmd)
 }
@@ -42,16 +44,28 @@ func runRestart(cmd *cobra.Command, args []string) error {
 
 	if err := nc.Runtime.Start(cmd.Context(), name); err != nil {
 		nc.Node.Status = "error"
-		nc.SaveState()
+		if saveErr := persistRestartState(name, nc, start); saveErr != nil {
+			return saveErr
+		}
 		writeAudit(auditEvent{Command: "restart", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "RESTART_ERROR", Start: start})
 		return exitWithError("RESTART_ERROR", output.ExitGeneralError,
 			fmt.Sprintf("Failed to start %s after stop: %v", name, err))
 	}
 
 	nc.Node.Status = "running"
-	nc.SaveState()
+	if err := persistRestartState(name, nc, start); err != nil {
+		return err
+	}
 	writeAudit(auditEvent{Command: "restart", Node: name, Target: nc.Target.String(), Result: "success", Start: start})
 
 	writeResult(map[string]any{"name": name, "status": "running"})
+	return nil
+}
+
+func persistRestartState(name string, nc *nodeContext, start time.Time) error {
+	if err := saveRestartState(nc); err != nil {
+		writeAudit(auditEvent{Command: "restart", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "STATE_ERROR", Start: start})
+		return exitWithError("STATE_ERROR", output.ExitGeneralError, fmt.Sprintf("Failed to persist %s state: %v", name, err))
+	}
 	return nil
 }

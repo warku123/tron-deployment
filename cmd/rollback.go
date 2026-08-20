@@ -21,6 +21,8 @@ var rollbackCmd = &cobra.Command{
 	RunE:  runRollback,
 }
 
+var saveRollbackState = func(nc *nodeContext) error { return nc.SaveState() }
+
 func init() {
 	rollbackCmd.Flags().StringVar(&rollbackJarURL, "jar-url", "", "Target-version JAR URL (jar runtime)")
 	rollbackCmd.Flags().StringVar(&rollbackJarSHA256, "jar-sha256", "", "Optional target-version JAR SHA256 (jar runtime)")
@@ -86,7 +88,9 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	nc.Node.Version = targetVersion
 	nc.Node.PreviousVersion = currentVersion
 	nc.Node.Status = "running"
-	nc.SaveState()
+	if err := persistRollbackState(name, nc, start); err != nil {
+		return err
+	}
 	writeAudit(auditEvent{Command: "rollback", Node: name, Target: nc.Target.String(), Result: "success", Start: start})
 
 	writeResult(map[string]any{
@@ -95,6 +99,14 @@ func runRollback(cmd *cobra.Command, args []string) error {
 		"version":          targetVersion,
 		"rolled_back_from": currentVersion,
 	})
+	return nil
+}
+
+func persistRollbackState(name string, nc *nodeContext, start time.Time) error {
+	if err := saveRollbackState(nc); err != nil {
+		writeAudit(auditEvent{Command: "rollback", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "STATE_ERROR", Start: start})
+		return exitWithError("STATE_ERROR", output.ExitGeneralError, fmt.Sprintf("Failed to persist %s state: %v", name, err))
+	}
 	return nil
 }
 

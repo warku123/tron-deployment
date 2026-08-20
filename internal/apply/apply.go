@@ -259,7 +259,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 	if node.Build == nil &&
 		opts.Existing != nil && opts.Existing.IntentHash == opts.IntentHash {
 		remediateJarConfigPermissions(ctx, opts, node)
-		return noChangeResult(opts, nil, start), nil
+		return noChangeResult(opts, nil, start)
 	}
 
 	// Resolve build before render. The artifact path it produces
@@ -280,7 +280,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		buildSummary != nil &&
 		opts.Existing.BuildCacheKey == buildSummary.CacheKey {
 		remediateJarConfigPermissions(ctx, opts, node)
-		return noChangeResult(opts, buildSummary, start), nil
+		return noChangeResult(opts, buildSummary, start)
 	}
 
 	rendered, err := render.RenderHOCONWithSecrets(opts.TemplateDir, opts.Intent, node)
@@ -603,13 +603,14 @@ func validateOptions(o Options) error {
 // pre-build no_change gate and the build-aware gate) check this
 // before invoking — the helper itself trusts the contract to keep
 // the body straight-line.
-func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *Result {
+func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) (*Result, error) {
 	// Backfill the network on legacy state. A node deployed before
 	// ManagedNode.Network existed has it empty; on a no-op re-apply we
 	// learn it from the intent, so persist it — otherwise the no_change
 	// Result would report network/is_private from the intent while a
 	// follow-up `status` (which reads state) still showed it absent.
-	// Best-effort: a save failure here doesn't fail the no-op.
+	// Persist metadata backfills as part of the no-op. Save failures propagate
+	// so callers cannot report success while legacy state remains stale.
 	if opts.Existing != nil && opts.Store != nil && opts.State != nil {
 		changed := false
 		if opts.Existing.Network != opts.Intent.Network {
@@ -623,7 +624,9 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 		}
 		if changed {
 			opts.Store.UpsertNode(opts.State, *opts.Existing)
-			_ = opts.Store.Save(opts.State)
+			if err := opts.Store.Save(opts.State); err != nil {
+				return nil, fmt.Errorf("persist no-change state: %w", err)
+			}
 		}
 	}
 
@@ -645,7 +648,7 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 		DurationMs:          time.Since(start).Milliseconds(),
 		Build:               buildSummary,
 		MonitoringEndpoints: monitoringEndpointsFromExisting(opts.Existing, host),
-	}
+	}, nil
 }
 
 // monitoringEndpointsFromExisting returns monitoring URLs from a managed

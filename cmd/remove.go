@@ -16,6 +16,8 @@ var (
 	removeConfirm  string
 )
 
+var saveRemoveState = func(nc *nodeContext) error { return nc.Store.Save(nc.State) }
+
 var removeCmd = &cobra.Command{
 	Use:   "remove <node>",
 	Short: "Remove a deployed node",
@@ -78,7 +80,9 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	nc.Store.RemoveNode(nc.State, name)
-	nc.Store.Save(nc.State)
+	if err := persistRemoveState(name, nc, start); err != nil {
+		return err
+	}
 	writeAudit(auditEvent{Command: "remove", Node: name, Target: nc.Target.String(), Result: "success", Start: start})
 
 	writeResult(map[string]any{
@@ -86,5 +90,13 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		"status":    "removed",
 		"keep_data": removeKeepData,
 	})
+	return nil
+}
+
+func persistRemoveState(name string, nc *nodeContext, start time.Time) error {
+	if err := saveRemoveState(nc); err != nil {
+		writeAudit(auditEvent{Command: "remove", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "STATE_ERROR", Start: start})
+		return exitWithError("STATE_ERROR", output.ExitGeneralError, fmt.Sprintf("Failed to persist %s state: %v", name, err))
+	}
 	return nil
 }
