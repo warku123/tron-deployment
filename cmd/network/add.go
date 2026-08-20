@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	applypkg "github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
@@ -226,6 +227,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		P2PPort:     node.Ports.P2P,
 		MetricsPort: node.Ports.Metrics,
 		InstallPath: node.InstallPath,
+		StorageRoot: applypkg.StorageRootForNode(node, "docker", paths.Deployments(), nodeName),
 		Labels:      node.Labels,
 	})
 	if err := store.Save(deployState); err != nil {

@@ -140,6 +140,31 @@ func TestApply_NoChangeRemediatesJarConfigPermissions(t *testing.T) {
 	}
 }
 
+func TestApply_NoChangeBackfillsStorageRoot(t *testing.T) {
+	parsed := minimalIntent()
+	parsed.Target.Runtime = "docker"
+	parsed.Nodes[0].Storage.Data = "/srv/tron/node0/output-directory"
+	store, st := freshStore(t)
+	existing := state.ManagedNode{
+		Name: parsed.Name, IntentHash: "same-hash", Runtime: "docker",
+	}
+	res, err := Apply(context.Background(), Options{
+		Intent: parsed, Target: &fakeTarget{}, Store: store, State: st,
+		IntentHash: "same-hash", Existing: &existing,
+		DeploymentsDir: "/srv/tron/deployments",
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.Outcome != "no_change" {
+		t.Fatalf("Outcome = %q, want no_change", res.Outcome)
+	}
+	got := store.GetNode(st, parsed.Name)
+	if got == nil || got.StorageRoot != "/srv/tron/node0/output-directory" {
+		t.Fatalf("StorageRoot = %v, want /srv/tron/node0/output-directory", got)
+	}
+}
+
 func TestApply_RequiresIntent(t *testing.T) {
 	if _, err := Apply(context.Background(), Options{}); err == nil {
 		t.Error("expected error when Intent is nil")

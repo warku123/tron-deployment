@@ -1,10 +1,12 @@
 package snapshot
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -40,6 +42,8 @@ upstream MD5 sidecar — if the sidecar cannot be fetched the download
 aborts rather than extracting unchecked data, unless you pass
 --no-verify. Also pre-checks free disk space and refuses to overwrite an
 existing database without --force.
+It refuses destinations belonging to running or error-state managed nodes;
+stop the node first, then download.
 
 The default destination is ./output-directory under the current working
 directory — same convention as the official tron-docker tooling. Pass
@@ -92,6 +96,21 @@ func init() {
 func runDownload(cmd *cobra.Command, _ []string) error {
 	outputFmt, _ := cmd.Flags().GetString("output")
 
+	dest := dlDest
+	if dlNode != "" {
+		resolved, err := destFromNode(dlNode)
+		if err != nil {
+			return output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
+		}
+		dest = resolved
+	}
+	if dest == "" {
+		dest = "./output-directory"
+	}
+	if err := refuseRunningNodeDestination(dest, dlNode); err != nil {
+		return err
+	}
+
 	src, err := resolveSource(dlDomain, dlNetwork, dlKind, dlRegion, dlEngine)
 	if err != nil {
 		return output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
@@ -104,18 +123,6 @@ func runDownload(cmd *cobra.Command, _ []string) error {
 			return output.NewError("LIST_ERROR", output.ExitGeneralError, err.Error())
 		}
 		backup = latest
-	}
-
-	dest := dlDest
-	if dlNode != "" {
-		resolved, err := destFromNode(dlNode)
-		if err != nil {
-			return output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
-		}
-		dest = resolved
-	}
-	if dest == "" {
-		dest = "./output-directory"
 	}
 
 	opts := snapshot.DownloadOptions{
@@ -225,6 +232,151 @@ func runDownload(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "Note: pre-existing userdata/ was preserved.")
 	}
 	return nil
+}
+
+// refuseRunningNodeDestination protects managed node databases from being
+// overwritten while java-tron (jar) or Docker holds them open. --force only
+// controls the ordinary existing-database overwrite prompt; it never bypasses
+// this data-corruption guard.
+func refuseRunningNodeDestination(dest, explicitNode string) error {
+	store, err := state.NewStore(paths.State())
+	if err != nil {
+		return output.NewError("STATE_ERROR", output.ExitGeneralError, err.Error())
+	}
+	st, err := store.Load()
+	if err != nil {
+		return output.NewError("STATE_ERROR", output.ExitGeneralError, err.Error())
+	}
+	var matched *state.ManagedNode
+	if explicitNode != "" {
+		matched = store.GetNode(st, explicitNode)
+	} else {
+		for i := range st.Nodes {
+			if st.Nodes[i].Status != "running" && st.Nodes[i].Status != "error" {
+				continue
+			}
+			if managedNodeDestinationMatches(dest, &st.Nodes[i]) {
+				matched = &st.Nodes[i]
+				break
+			}
+		}
+	}
+	if matched == nil || (matched.Status != "running" && matched.Status != "error") {
+		return nil
+	}
+	// An error can mean restart failed while the container is still alive;
+	// treat it as unsafe until the operator explicitly stops the node.
+	return output.NewError("NODE_RUNNING", output.ExitGeneralError,
+		fmt.Sprintf("refusing to write snapshot into running node %q data directory", matched.Name)).
+		WithSuggestions("Stop the node first: trond stop " + matched.Name)
+}
+
+func managedNodeDestinationMatches(dest string, node *state.ManagedNode) bool {
+	if node == nil || dest == "" {
+		return false
+	}
+	destAbs, err := filepath.Abs(filepath.Clean(dest))
+	if err != nil {
+		return false
+	}
+	roots := make([]string, 0, 2)
+	if node.InstallPath != "" && node.Runtime != "docker" {
+		rootAbs, rootErr := filepath.Abs(filepath.Clean(node.InstallPath))
+		if rootErr == nil {
+			roots = append(roots, rootAbs)
+		}
+	}
+	if node.StorageRoot != "" {
+		storageAbs, storageErr := filepath.Abs(filepath.Clean(node.StorageRoot))
+		if storageErr == nil {
+			roots = append(roots, storageAbs)
+		}
+	}
+	if node.Runtime == "docker" && node.StorageRoot == "" {
+		if fallback, ok := legacyDockerStorageRoot(node.Name); ok {
+			roots = append(roots, fallback)
+		}
+	}
+	for _, root := range roots {
+		candidates := []string{root, filepath.Join(root, "output-directory"), filepath.Join(root, "output-directory", "database"), filepath.Join(root, "database")}
+		if filepath.Base(root) == "output-directory" {
+			candidates = append(candidates, filepath.Dir(root))
+		}
+		for _, candidate := range candidates {
+			if samePath(destAbs, candidate) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// legacyDockerStorageRoot recovers bind sources from pre-storage_root state.
+// Compose is generated in a stable, one-volume-per-line form; parse only the
+// volume targeting java-tron's data directory.
+func legacyDockerStorageRoot(name string) (string, bool) {
+	compose := filepath.Join(paths.Deployments(), name, "docker-compose.yaml")
+	f, err := os.Open(compose)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: state predates storage_root tracking; guard incomplete, please re-apply %s\n", name)
+		return "", false
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		marker := ":/java-tron/output-directory"
+		if i := strings.Index(line, marker); i >= 0 {
+			source := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line[:i]), "-"))
+			if strings.HasPrefix(source, "/") {
+				return source, true
+			}
+			if strings.HasPrefix(source, "./") {
+				return filepath.Join(paths.Deployments(), name, source), true
+			}
+			if source != "" {
+				fmt.Fprintf(os.Stderr, "warning: named volume — host path unresolvable; guard cannot cover node %s\n", name)
+				return "", false
+			}
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: unable to parse compose file; guard incomplete, please re-apply %s: %v\n", name, err)
+		return "", false
+	}
+	fmt.Fprintf(os.Stderr, "warning: compose bind source not found; guard incomplete, please re-apply %s\n", name)
+	return "", false
+}
+
+func samePath(left, right string) bool {
+	left = canonicalPath(left)
+	right = canonicalPath(right)
+	return left == right
+}
+
+func canonicalPath(path string) string {
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	// The destination may not exist yet. Resolve the nearest existing parent
+	// so a symlinked storage root still compares equal before extraction.
+	missing := []string{}
+	for current := path; ; current = filepath.Dir(current) {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Clean(resolved)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		missing = append(missing, filepath.Base(current))
+	}
+	return path
 }
 
 // downloadPayload builds the `-o json` body for a completed foreground

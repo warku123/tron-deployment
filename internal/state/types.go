@@ -25,6 +25,7 @@ type ManagedNode struct {
 	ComposePath     string     `json:"compose_path,omitempty"`
 	SystemdUnit     string     `json:"systemd_unit,omitempty"`
 	InstallPath     string     `json:"install_path,omitempty"`
+	StorageRoot     string     `json:"storage_root,omitempty"`
 	// HTTPPort and GRPCPort capture the API ports as configured at deploy time
 	// so probe commands (health, diagnose, verify) can target the right port
 	// without re-reading the intent file. Older state files predate these

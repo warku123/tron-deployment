@@ -402,6 +402,7 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 		MetricsPort: node.Ports.Metrics,
 		Labels:      node.Labels,
 		InstallPath: node.InstallPath,
+		StorageRoot: StorageRootForNode(node, runtimeType, opts.DeploymentsDir, opts.Intent.Name),
 		Monitoring:  monRes.managed,
 	}
 	outcome := "created"
@@ -461,6 +462,37 @@ func remediateJarConfigPermissions(ctx context.Context, opts Options, node *inte
 	// Best effort preserves the existing no_change result contract. Failure
 	// observability belongs in a future warnings/audit contract, not this AUD.
 	_ = perms.Chmod(ctx, filepath.Join(node.InstallPath, "config.conf"), 0o600)
+}
+
+// StorageRootForNode records only host bind-mount roots. Named volumes are
+// intentionally left empty: snapshot --to cannot safely resolve their host
+// path. The values mirror render.storageSource's explicit data, then path
+// resolution order.
+func StorageRootForNode(node *intent.NodeSpec, runtimeType, deploymentsDir, nodeName string) string {
+	if runtimeType != "docker" || node == nil {
+		return ""
+	}
+	if node.Storage.Data != "" {
+		return bindStoragePath(node.Storage.Data, deploymentsDir, nodeName)
+	}
+	if node.Storage.StoragePath != "" {
+		root := bindStoragePath(node.Storage.StoragePath, deploymentsDir, nodeName)
+		if root == "" {
+			return ""
+		}
+		return filepath.Join(root, "data")
+	}
+	return ""
+}
+
+func bindStoragePath(path, deploymentsDir, nodeName string) string {
+	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "./") {
+		return ""
+	}
+	if strings.HasPrefix(path, "./") {
+		return filepath.Join(deploymentsDir, nodeName, path)
+	}
+	return path
 }
 
 // recordedNode returns the managed node this apply would replace, i.e. the
@@ -578,10 +610,21 @@ func noChangeResult(opts Options, buildSummary *BuildSummary, start time.Time) *
 	// Result would report network/is_private from the intent while a
 	// follow-up `status` (which reads state) still showed it absent.
 	// Best-effort: a save failure here doesn't fail the no-op.
-	if opts.Existing != nil && opts.Existing.Network != opts.Intent.Network && opts.Store != nil && opts.State != nil {
-		opts.Existing.Network = opts.Intent.Network
-		opts.Store.UpsertNode(opts.State, *opts.Existing)
-		_ = opts.Store.Save(opts.State)
+	if opts.Existing != nil && opts.Store != nil && opts.State != nil {
+		changed := false
+		if opts.Existing.Network != opts.Intent.Network {
+			opts.Existing.Network = opts.Intent.Network
+			changed = true
+		}
+		storageRoot := StorageRootForNode(&opts.Intent.Nodes[0], opts.Existing.Runtime, opts.DeploymentsDir, opts.Intent.Name)
+		if storageRoot != "" && opts.Existing.StorageRoot != storageRoot {
+			opts.Existing.StorageRoot = storageRoot
+			changed = true
+		}
+		if changed {
+			opts.Store.UpsertNode(opts.State, *opts.Existing)
+			_ = opts.Store.Save(opts.State)
+		}
 	}
 
 	ports := opts.Intent.Nodes[0].Ports

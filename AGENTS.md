@@ -278,6 +278,8 @@ done
 trond apply --intent intent-with-snapshot.yaml --auto-approve --wait -o json
 ```
 
+Snapshot download refuses destinations belonging to running or error-state managed nodes (`NODE_RUNNING`); stop the node before writing chain data.
+
 ### `plaintext_transport` — do not skip this
 
 The six mainnet mirrors are bare IPs that publish **no HTTPS endpoint**
