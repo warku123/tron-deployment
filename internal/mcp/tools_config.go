@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -85,9 +86,9 @@ func renderTool(ctx context.Context, _ *mcp.CallToolRequest, args renderArg) (*m
 		if err != nil {
 			return errResult(err)
 		}
-		memGB := render.ParseMemoryGB(node.Resources.Memory)
-		if memGB == 0 {
-			memGB = 16
+		memGB, err := render.ParseMemoryGB(node.Resources.Memory)
+		if err != nil {
+			return errResult(fmt.Errorf("invalid resources.memory %q: %w", node.Resources.Memory, err))
 		}
 		jvmArgs := render.JVMArgsString(memGB, 17, node.JVM)
 

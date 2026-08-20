@@ -181,9 +181,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	// Deploy path — needs the real witness key inlined.
 	hocon := rendered.Deployable()
 
-	memGB := render.ParseMemoryGB(node.Resources.Memory)
-	if memGB == 0 {
-		memGB = 16
+	memGB, err := render.ParseMemoryGB(node.Resources.Memory)
+	if err != nil {
+		return output.NewError("VALIDATION_ERROR", output.ExitValidationError,
+			fmt.Sprintf("invalid resources.memory %q: %v", node.Resources.Memory, err))
 	}
 	jvmArgs := render.JVMArgsString(memGB, 17, node.JVM)
 	composeYAML := render.RenderCompose(nodeName, parsed, node, "", jvmArgs, "")

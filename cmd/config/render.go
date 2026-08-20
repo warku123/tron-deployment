@@ -100,9 +100,10 @@ func runRender(cmd *cobra.Command, args []string) error {
 		// host memory, so we size from the intent's resources.memory and
 		// default to JDK 17 — both are safe static assumptions for the
 		// `config render` preview path.
-		memGB := render.ParseMemoryGB(node.Resources.Memory)
-		if memGB == 0 {
-			memGB = 16
+		memGB, err := render.ParseMemoryGB(node.Resources.Memory)
+		if err != nil {
+			return output.NewError("VALIDATION_ERROR", output.ExitValidationError,
+				fmt.Sprintf("invalid resources.memory %q: %v", node.Resources.Memory, err))
 		}
 		jvmArgs := render.JVMArgsString(memGB, 17, node.JVM)
 

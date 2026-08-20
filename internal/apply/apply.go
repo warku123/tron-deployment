@@ -297,9 +297,9 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 	if jdk == 0 {
 		jdk = detectJDK(ctx, opts.Target)
 	}
-	memGB := render.ParseMemoryGB(node.Resources.Memory)
-	if memGB == 0 {
-		memGB = 16
+	memGB, err := render.ParseMemoryGB(node.Resources.Memory)
+	if err != nil {
+		return nil, fmt.Errorf("invalid resources.memory %q: %w", node.Resources.Memory, err)
 	}
 	jvmArgs := render.JVMArgsString(memGB, jdk, node.JVM)
 
