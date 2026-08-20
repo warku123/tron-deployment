@@ -30,13 +30,15 @@ func readLiveConfigForMCP(ctx context.Context, tgt target.Target, node *state.Ma
 	return string(out), nil
 }
 
-// redactLiveConfigForMCP applies the existing display redaction before a
-// complete live config crosses the MCP boundary. Raw reads remain available
-// to comparison code, which must detect witness-key rotation.
-func redactLiveConfigForMCP(config string) string {
-	lines := strings.Split(config, "\n")
-	for i, line := range lines {
-		lines[i] = render.RedactWitnessLine(line)
+// redactConfText removes witness signing keys from a whole conf before
+// it is handed out. Split/join around render.RedactWitnessLines, which
+// finds the key values by parsing rather than by line shape, so the
+// formatting of the node's live conf does not matter.
+func redactConfText(conf string) string {
+	if conf == "" {
+		return conf
 	}
-	return strings.Join(lines, "\n")
+	// Splitting on \n and rejoining preserves \r\n line endings, since
+	// the \r stays attached to the line content.
+	return strings.Join(render.RedactWitnessLines(strings.Split(conf, "\n")), "\n")
 }

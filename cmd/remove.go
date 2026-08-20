@@ -51,7 +51,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	start := time.Now()
-	nc, err := resolveNodeContext(name)
+	nc, err := resolveNodeContextForWrite(name)
 	if err != nil {
 		return err
 	}

@@ -69,10 +69,13 @@ func (s *Store) Save(state *DeploymentState) error {
 		return fmt.Errorf("marshal state: %w", err)
 	}
 
-	// Save guarantees complete file contents via same-directory atomic rename.
-	// Concurrent lost-update protection is the caller's responsibility while
-	// holding state.lock (AUD-015 tracked separately).
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".state-*.tmp")
+	// Atomic write: write to a unique temp file, fsync, then rename. The
+	// temp name is unique per call — a fixed ".tmp" is shared by concurrent
+	// writers, which then overwrite each other's half-written file and
+	// rename whatever is left, so the rename stops being atomic in practice.
+	// Save guarantees complete file contents; lost-update protection between
+	// concurrent writers comes from the caller holding state.lock.
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), filepath.Base(s.path)+".tmp*")
 	if err != nil {
 		return fmt.Errorf("create state temp file: %w", err)
 	}
@@ -93,6 +96,11 @@ func (s *Store) Save(state *DeploymentState) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close state temp file: %w", err)
 	}
+	if err := os.Chmod(tmpPath, 0600); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("chmod state temp file: %w", err)
+	}
+
 	if err := os.Rename(tmpPath, s.path); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename state file: %w", err)

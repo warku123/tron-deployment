@@ -33,6 +33,10 @@ type SSHTarget struct {
 	identityFile   string
 	knownHostsFile string // Path to known_hosts; empty uses ~/.ssh/known_hosts
 	client         *ssh.Client
+	// provisioning widens the command whitelist to the package managers and
+	// shell that host preparation needs. Only SetProvisioning sets it, and
+	// only `trond bootstrap` calls that.
+	provisioning bool
 }
 
 var sshNetDialContext = (&net.Dialer{}).DialContext
@@ -256,7 +260,11 @@ func (t *SSHTarget) Exec(ctx context.Context, cmd string, args ...string) ([]byt
 		return nil, fmt.Errorf("ssh not connected")
 	}
 
-	if err := security.ValidateCommand(cmd); err != nil {
+	validate := security.ValidateCommand
+	if t.provisioning {
+		validate = security.ValidateProvisioningCommand
+	}
+	if err := validate(cmd); err != nil {
 		return nil, err
 	}
 
