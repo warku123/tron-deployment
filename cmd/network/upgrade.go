@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tronprotocol/tron-deployment/internal/guard"
+	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/state"
+	"gopkg.in/yaml.v3"
 )
 
 // upgradeCmd does a rolling upgrade across every node in a private
@@ -165,9 +168,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		}
 
 		stepStart = time.Now()
-		err = runChild(cmd.Context(), exe, "verify",
-			"--intent", upgradeIntentPath,
-			"--timeout", upgradeVerifyTimeout.String())
+		err = verifyNode(cmd.Context(), exe, node, upgradeIntentPath, upgradeVerifyTimeout)
 		steps = append(steps, upgradeStep{
 			Node:       node,
 			Phase:      "verify",
@@ -233,12 +234,52 @@ func isWitnessNode(n state.ManagedNode) bool {
 	return strings.Contains(strings.ToLower(n.Name), "witness")
 }
 
-func runChild(ctx context.Context, exe string, argv ...string) error {
+var runChild = runChildCommand
+
+func runChildCommand(ctx context.Context, exe string, argv ...string) error {
 	argv = append(argv, "--output", "json")
 	cmd := exec.CommandContext(ctx, exe, argv...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// verifyNode projects the multi-node intent to the node being upgraded before
+// invoking the existing single-node verify command. Verify reads Nodes[0], so
+// passing the original multi-node intent would silently verify only node 0.
+func verifyNode(ctx context.Context, exe, node, intentPath string, timeout time.Duration) error {
+	parsed, err := intent.Load(intentPath)
+	if err != nil {
+		return fmt.Errorf("load verify intent: %w", err)
+	}
+	var projected *intent.Intent
+	for i := range parsed.Nodes {
+		if fmt.Sprintf("%s-node%d", parsed.Name, i) == node {
+			projected, _, _, err = nodeIntent(parsed, i)
+			break
+		}
+	}
+	if projected == nil {
+		return fmt.Errorf("node %q is not present in verify intent", node)
+	}
+	data, err := yaml.Marshal(projected)
+	if err != nil {
+		return fmt.Errorf("marshal verify intent for %s: %w", node, err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(intentPath), ".trond-verify-*.yaml")
+	if err != nil {
+		return fmt.Errorf("create verify intent for %s: %w", node, err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write verify intent for %s: %w", node, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close verify intent for %s: %w", node, err)
+	}
+	return runChild(ctx, exe, "verify", "--intent", tmpPath, "--timeout", timeout.String())
 }
 
 func statusFor(err error) string {
