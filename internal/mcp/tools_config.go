@@ -64,6 +64,10 @@ func renderTool(ctx context.Context, _ *mcp.CallToolRequest, args renderArg) (*m
 	if err != nil {
 		return errResult(err)
 	}
+	if args.Node < 0 || args.Node > len(parsed.Nodes) {
+		return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError,
+			fmt.Sprintf("node index %d out of range; use 0 for all or 1-%d", args.Node, len(parsed.Nodes))))
+	}
 
 	// templateDir resolution: empty → embedded templates. We don't
 	// expose a `template_dir` arg because MCP clients usually live on

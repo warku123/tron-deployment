@@ -17,6 +17,8 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
+var diagnoseCheckers = diagnosis.AllCheckers
+
 // registerDiagnosticTools wires up read-only triage tools. Pure-data
 // when possible; light HTTP probes where the data only exists at
 // runtime.
@@ -240,12 +242,13 @@ func diagnoseTool(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*m
 
 	opts := diagnosis.CheckOpts{
 		NodeName: node.Name,
+		Network:  node.Network,
 		Runtime:  node.Runtime,
 		HTTPPort: node.HTTPPort,
 		GRPCPort: node.GRPCPort,
 	}
 
-	checkers := diagnosis.AllCheckers()
+	checkers := diagnoseCheckers()
 	results := make([]diagnosis.CheckResult, 0, len(checkers))
 	for _, c := range checkers {
 		results = append(results, c.Run(ctx, tgt, opts))

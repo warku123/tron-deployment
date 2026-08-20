@@ -33,6 +33,14 @@ var saveHealState = func(store *state.Store, st *state.DeploymentState) error {
 }
 
 var runHealAction = mcpRunHealAction
+var healCheckers = diagnosis.AllCheckers
+
+var healRuntimeForNode = func(tgt target.Target, node *state.ManagedNode) runtime.Runtime {
+	if node.Runtime == "jar" {
+		return runtime.NewJarRuntime(tgt)
+	}
+	return runtime.NewDockerRuntime(tgt, paths.Deployments())
+}
 
 func registerHealTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
@@ -101,6 +109,7 @@ func autoHealTool(ctx context.Context, _ *mcp.CallToolRequest, args autoHealArgs
 	defer cancel()
 	opts := diagnosis.CheckOpts{
 		NodeName:    node.Name,
+		Network:     node.Network,
 		Runtime:     node.Runtime,
 		HTTPPort:    node.HTTPPort,
 		GRPCPort:    node.GRPCPort,
@@ -112,7 +121,7 @@ func autoHealTool(ctx context.Context, _ *mcp.CallToolRequest, args autoHealArgs
 		skipped      []map[string]any
 		stillFailing []diagnosis.CheckResult
 	)
-	for _, c := range diagnosis.AllCheckers() {
+	for _, c := range healCheckers() {
 		r := c.Run(probeCtx, tgt, opts)
 		if r.Status != diagnosis.StatusFail {
 			continue
@@ -193,7 +202,7 @@ func mcpProposeHealAction(r diagnosis.CheckResult, nodeStatus string) (mcpHealAc
 }
 
 func mcpRunHealAction(ctx context.Context, tgt target.Target, node *state.ManagedNode, action mcpHealAction) error {
-	rt := runtime.NewDockerRuntime(tgt, paths.Deployments())
+	rt := healRuntimeForNode(tgt, node)
 	if action.action == "start" {
 		return rt.Start(ctx, node.Name)
 	}

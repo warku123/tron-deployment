@@ -387,11 +387,14 @@ func Apply(ctx context.Context, opts Options) (*Result, error) {
 			Port:         opts.Intent.Target.Port,
 			IdentityFile: opts.Intent.Target.IdentityFile,
 		},
-		Runtime:     runtimeType,
-		Status:      "running",
-		LastApplied: time.Now().UTC(),
-		HTTPPort:    node.Ports.HTTP,
-		GRPCPort:    node.Ports.GRPC,
+		Runtime:          runtimeType,
+		Status:           "running",
+		LastApplied:      time.Now().UTC(),
+		HTTPPort:         node.Ports.HTTP,
+		GRPCPort:         node.Ports.GRPC,
+		SolidityHTTPPort: node.Ports.SolidityHTTP,
+		SolidityGRPCPort: node.Ports.SolidityGRPC,
+		JSONRPCPort:      node.Ports.JSONRPC,
 		// P2PPort is load-bearing, not cosmetic: `network add` builds the
 		// joining node's peer list from the P2PPort of every node already
 		// in state and SKIPS any entry where it is zero. Omitting it here

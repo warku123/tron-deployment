@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -132,15 +131,15 @@ func runApply(cmd *cobra.Command, args []string) error {
 	existing := store.GetNode(deployState, parsed.Name)
 	if parsed.Target.AutoPorts && existing != nil {
 		if len(parsed.Nodes) == 1 {
-			restoreAutoPorts(&parsed.Nodes[0], existing)
+			apply.RestoreAutoPorts(&parsed.Nodes[0], existing)
 		}
 	}
 	canonicalIntent, err := yaml.Marshal(parsed)
 	if err != nil {
 		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, "marshal effective intent: "+err.Error())
 	}
-	intentHash := versionedIntentHash(canonicalIntent)
-	legacyMatch := existing != nil && legacyIntentHashMatches(existing.IntentHash, rawIntent, parsed, existing)
+	intentHash := apply.EffectiveIntentHash(canonicalIntent)
+	legacyMatch := existing != nil && apply.LegacyIntentHashMatches(rawIntent, canonicalIntent, existing)
 	if legacyMatch {
 		// Preserve the recorded legacy hash for a true no-op. The next
 		// intentional change will write the versioned hash during apply.
@@ -165,7 +164,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		State:          deployState,
 		IntentHash:     intentHash,
 		Existing:       existing,
-		TemplateDir:    findTemplatesDir(),
+		TemplateDir:    apply.FindTemplatesDir(),
 		DeploymentsDir: deploymentsDir(),
 		EnvVars:        resolveEnvVars(&parsed.Nodes[0]),
 		IntentPath:     applyIntentPath, // FR-021: relative build.source resolves vs this
@@ -216,67 +215,6 @@ func runApply(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func versionedIntentHash(data []byte) string {
-	h := sha256.New()
-	h.Write([]byte("intent-hash-v2\x00"))
-	h.Write(data)
-	return fmt.Sprintf("v2:%x", h.Sum(nil))
-}
-
-func legacyIntentHashMatches(stored string, raw []byte, parsed *intent.Intent, existing *state.ManagedNode) bool {
-	if len(stored) == 0 || len(stored) > 3 && stored[:3] == "v2:" {
-		return false
-	}
-	if apply.IntentHashFromBytes(raw) == stored {
-		var rawIntent intent.Intent
-		if err := yaml.Unmarshal(raw, &rawIntent); err != nil {
-			return false
-		}
-		if monitoringEnabled(rawIntent.Monitoring) != monitoringEnabled(parsed.Monitoring) {
-			return false
-		}
-		if monitoringEnabled(parsed.Monitoring) != recordedMonitoringEnabled(existing) {
-			return false
-		}
-		return true
-	}
-	canonical, err := yaml.Marshal(parsed)
-	return err == nil && apply.IntentHashFromBytes(canonical) == stored &&
-		monitoringEnabled(parsed.Monitoring) == recordedMonitoringEnabled(existing)
-}
-
-func monitoringEnabled(m *intent.Monitoring) bool {
-	return m != nil && m.Enabled != nil && *m.Enabled
-}
-
-func recordedMonitoringEnabled(existing *state.ManagedNode) bool {
-	return existing != nil && existing.Monitoring != nil && existing.Monitoring.Enabled
-}
-
-func restoreAutoPorts(node *intent.NodeSpec, existing *state.ManagedNode) {
-	if existing.HTTPPort != 0 {
-		node.Ports.HTTP = existing.HTTPPort
-	}
-	if existing.GRPCPort != 0 {
-		node.Ports.GRPC = existing.GRPCPort
-	}
-	if existing.P2PPort != 0 {
-		node.Ports.P2P = existing.P2PPort
-	}
-	if existing.MetricsPort != 0 {
-		node.Ports.Metrics = existing.MetricsPort
-	}
-	if existing.SolidityHTTPPort != 0 {
-		node.Ports.SolidityHTTP = existing.SolidityHTTPPort
-	}
-	if existing.SolidityGRPCPort != 0 {
-		node.Ports.SolidityGRPC = existing.SolidityGRPCPort
-	}
-	if existing.JSONRPCPort != 0 {
-		node.Ports.JSONRPC = existing.JSONRPCPort
-	}
-}
-
 func resolveTarget(parsed *intent.Intent) (target.Target, error) {
 	switch parsed.Target.Type {
 	case "ssh":
@@ -301,22 +239,7 @@ func resolveEnvVars(node *intent.NodeSpec) map[string]string {
 	return env
 }
 
-// findTemplatesDir returns an optional on-disk templates directory.
-// Empty return signals render to use the embedded copy.
-func findTemplatesDir() string {
-	if d := os.Getenv("TROND_TEMPLATES_DIR"); d != "" {
-		return d
-	}
-	candidates := []string{"templates", "./templates"}
-	for _, c := range candidates {
-		if info, err := os.Stat(c); err == nil && info.IsDir() {
-			if _, err := os.Stat(c + "/main_net_config.conf"); err == nil {
-				return c
-			}
-		}
-	}
-	return ""
-}
+func findTemplatesDir() string { return apply.FindTemplatesDir() }
 
 // exitWithError returns a StructuredError for propagation through cobra RunE.
 func exitWithError(code string, exitCode int, msg string, suggestions ...string) error {

@@ -42,13 +42,7 @@ func init() {
 	rootCmd.AddCommand(planCmd)
 }
 
-type planChange struct {
-	Type            string `json:"type"`
-	Field           string `json:"field"`
-	From            any    `json:"from,omitempty"`
-	To              any    `json:"to,omitempty"`
-	RestartRequired bool   `json:"restart_required"`
-}
+type planChange = apply.PlanChange
 
 func runPlan(cmd *cobra.Command, args []string) error {
 	outputFmt, _ := cmd.Flags().GetString("output")
@@ -59,11 +53,7 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
 	}
 
-	// 2. Compute intent hash
-	intentData, _ := os.ReadFile(planIntentPath)
-	intentHash := apply.IntentHashFromBytes(intentData)
-
-	// 3. Load current state
+	// 2. Load current state
 	store, err := state.NewStore(statePath())
 	if err != nil {
 		return exitWithError("STATE_ERROR", output.ExitGeneralError, err.Error())
@@ -75,85 +65,26 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	}
 
 	existing := store.GetNode(deployState, parsed.Name)
-
-	// 4. Render config to compute config hash
-	templateDir := findTemplatesDir()
-	node := &parsed.Nodes[0]
-
-	rendered, err := render.RenderHOCONWithSecrets(templateDir, parsed, node)
+	if parsed.Target.AutoPorts && existing != nil {
+		apply.RestoreAutoPorts(&parsed.Nodes[0], existing)
+	}
+	rawIntent, err := os.ReadFile(planIntentPath)
 	if err != nil {
-		return exitWithError("RENDER_ERROR", output.ExitGeneralError, err.Error())
+		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
 	}
-	// The REAL bytes: config_hash must match what apply deploys, and the
-	// diff below must compare real values so a rotated witness key is
-	// still detected. Nothing from here reaches the output un-redacted —
-	// simpleHOCONDiff redacts every line at the point it emits it.
-	hoconConfig := rendered.Deployable()
-	configHash := apply.IntentHashFromBytes([]byte(hoconConfig))
-
-	// 5. Diff
-	var changes []planChange
-	destructive := false
-	downtime := 0
-
-	if existing == nil {
-		// New deployment
-		changes = append(changes, planChange{
-			Type:  "create",
-			Field: "node",
-			To:    parsed.Name,
-		})
-	} else {
-		// Check for changes
-		if existing.IntentHash != intentHash {
-			changes = append(changes, planChange{
-				Type:            "update",
-				Field:           "intent",
-				From:            existing.IntentHash[:12] + "...",
-				To:              intentHash[:12] + "...",
-				RestartRequired: true,
-			})
-		}
-		if existing.ConfigHash != configHash {
-			changes = append(changes, planChange{
-				Type:            "update",
-				Field:           "config",
-				From:            existing.ConfigHash[:12] + "...",
-				To:              configHash[:12] + "...",
-				RestartRequired: true,
-			})
-			downtime = 30 // Estimated restart time
-		}
-		if existing.Version != node.Version && node.Version != "latest" {
-			changes = append(changes, planChange{
-				Type:            "update",
-				Field:           "version",
-				From:            existing.Version,
-				To:              node.Version,
-				RestartRequired: true,
-			})
-			downtime = 60
-		}
-	}
-
-	currentState := "not deployed"
-	if existing != nil {
-		currentState = existing.Status
-	}
-
-	runtimeType := parsed.Target.Runtime
-	if runtimeType == "" {
-		runtimeType = "docker"
+	planned, err := apply.Plan(parsed, existing, rawIntent, apply.FindTemplatesDir())
+	if err != nil {
+		return err
 	}
 
 	result := map[string]any{
 		"name":                       parsed.Name,
-		"current_state":              currentState,
+		"current_state":              planned.CurrentState,
 		"desired_state":              "running",
-		"changes":                    changes,
-		"destructive":                destructive,
-		"estimated_downtime_seconds": downtime,
-		"runtime":                    runtimeType,
+		"changes":                    planned.Changes,
+		"destructive":                false,
+		"estimated_downtime_seconds": planned.Downtime,
+		"runtime":                    planned.Runtime,
 		"network":                    parsed.Network,
 	}
 
@@ -167,7 +98,7 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		deployedPath := filepath.Join(paths.Deployments(), parsed.Name, parsed.Name+".conf")
 		if data, err := os.ReadFile(deployedPath); err == nil {
 			diffLines = simpleHOCONDiff(strings.Split(string(data), "\n"),
-				strings.Split(hoconConfig, "\n"))
+				strings.Split(string(planned.Config), "\n"))
 		}
 		// JSON consumers always get the field (possibly empty array)
 		// so they can distinguish "no changes" from "diff was not
@@ -178,7 +109,7 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	if outputFmt == "json" {
 		output.WriteJSON(os.Stdout, result)
 	} else {
-		printPlanText(result, changes)
+		printPlanText(result, planned.Changes)
 		if planShowDiff {
 			printDiffSection(existing, diffLines)
 		}
