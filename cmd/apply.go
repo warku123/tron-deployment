@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/spf13/cobra"
 
@@ -95,9 +98,6 @@ func runApply(cmd *cobra.Command, args []string) error {
 		}
 		parsed.Monitoring.Enabled = intent.BoolPtr(true)
 		intent.ApplyMonitoringDefaults(parsed.Monitoring)
-	} else if parsed.Monitoring != nil && parsed.Monitoring.Enabled != nil && *parsed.Monitoring.Enabled {
-		// Intent says enabled=true, but no --monitor flag: disable.
-		parsed.Monitoring.Enabled = intent.BoolPtr(false)
 	}
 
 	// 2. Resolve target. SSH cert handling lives here in the cmd
@@ -128,14 +128,29 @@ func runApply(cmd *cobra.Command, args []string) error {
 	}
 
 	// 5. Compute intent hash.
-	intentData, _ := os.ReadFile(applyIntentPath)
-	intentHash := apply.IntentHashFromBytes(intentData)
+	rawIntent, _ := os.ReadFile(applyIntentPath)
+	existing := store.GetNode(deployState, parsed.Name)
+	if parsed.Target.AutoPorts && existing != nil {
+		if len(parsed.Nodes) == 1 {
+			restoreAutoPorts(&parsed.Nodes[0], existing)
+		}
+	}
+	canonicalIntent, err := yaml.Marshal(parsed)
+	if err != nil {
+		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, "marshal effective intent: "+err.Error())
+	}
+	intentHash := versionedIntentHash(canonicalIntent)
+	legacyMatch := existing != nil && legacyIntentHashMatches(existing.IntentHash, rawIntent, parsed, existing)
+	if legacyMatch {
+		// Preserve the recorded legacy hash for a true no-op. The next
+		// intentional change will write the versioned hash during apply.
+		intentHash = existing.IntentHash
+	}
 
 	// 6. HUMAN_REQUIRED gate. The internal/apply package handles the
 	// no-op short-circuit (same-hash → "no_change") on its own; we
 	// only need to guard the destructive change-on-existing-node case.
-	existing := store.GetNode(deployState, parsed.Name)
-	if existing != nil && existing.IntentHash != intentHash && !applyAutoApprove {
+	if existing != nil && existing.IntentHash != intentHash && !legacyMatch && !applyAutoApprove {
 		return exitWithError("HUMAN_REQUIRED", output.ExitHumanRequired,
 			fmt.Sprintf("Changes detected for node %q. Review with: trond plan --intent %s", parsed.Name, applyIntentPath),
 			"Re-run with --auto-approve to apply changes",
@@ -199,6 +214,67 @@ func runApply(cmd *cobra.Command, args []string) error {
 		writeResult(resultMap)
 	}
 	return nil
+}
+
+func versionedIntentHash(data []byte) string {
+	h := sha256.New()
+	h.Write([]byte("intent-hash-v2\x00"))
+	h.Write(data)
+	return fmt.Sprintf("v2:%x", h.Sum(nil))
+}
+
+func legacyIntentHashMatches(stored string, raw []byte, parsed *intent.Intent, existing *state.ManagedNode) bool {
+	if len(stored) == 0 || len(stored) > 3 && stored[:3] == "v2:" {
+		return false
+	}
+	if apply.IntentHashFromBytes(raw) == stored {
+		var rawIntent intent.Intent
+		if err := yaml.Unmarshal(raw, &rawIntent); err != nil {
+			return false
+		}
+		if monitoringEnabled(rawIntent.Monitoring) != monitoringEnabled(parsed.Monitoring) {
+			return false
+		}
+		if monitoringEnabled(parsed.Monitoring) != recordedMonitoringEnabled(existing) {
+			return false
+		}
+		return true
+	}
+	canonical, err := yaml.Marshal(parsed)
+	return err == nil && apply.IntentHashFromBytes(canonical) == stored &&
+		monitoringEnabled(parsed.Monitoring) == recordedMonitoringEnabled(existing)
+}
+
+func monitoringEnabled(m *intent.Monitoring) bool {
+	return m != nil && m.Enabled != nil && *m.Enabled
+}
+
+func recordedMonitoringEnabled(existing *state.ManagedNode) bool {
+	return existing != nil && existing.Monitoring != nil && existing.Monitoring.Enabled
+}
+
+func restoreAutoPorts(node *intent.NodeSpec, existing *state.ManagedNode) {
+	if existing.HTTPPort != 0 {
+		node.Ports.HTTP = existing.HTTPPort
+	}
+	if existing.GRPCPort != 0 {
+		node.Ports.GRPC = existing.GRPCPort
+	}
+	if existing.P2PPort != 0 {
+		node.Ports.P2P = existing.P2PPort
+	}
+	if existing.MetricsPort != 0 {
+		node.Ports.Metrics = existing.MetricsPort
+	}
+	if existing.SolidityHTTPPort != 0 {
+		node.Ports.SolidityHTTP = existing.SolidityHTTPPort
+	}
+	if existing.SolidityGRPCPort != 0 {
+		node.Ports.SolidityGRPC = existing.SolidityGRPCPort
+	}
+	if existing.JSONRPCPort != 0 {
+		node.Ports.JSONRPC = existing.JSONRPCPort
+	}
 }
 
 func resolveTarget(parsed *intent.Intent) (target.Target, error) {

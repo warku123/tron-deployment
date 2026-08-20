@@ -89,14 +89,39 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	workDir := paths.Deployments()
-
 	type failure struct {
 		Name  string `json:"name"`
 		Error string `json:"error"`
 	}
+	// Keep the recorded target for network-level cleanup before removing the
+	// nodes from state. Never fall back to the operator's local Docker daemon.
+	// Network create/add allow mixed targets. Keep one target per distinct
+	// target identity and run network-level cleanup on every one; this avoids
+	// assuming the first node represents the whole network.
+	networkTargets := make(map[string]target.Target)
+	var targetFailures []failure
+	failedTargetKeys := make(map[string]bool)
+	for _, n := range deployState.Nodes {
+		if !(strings.HasPrefix(n.Name, prefix) || n.Name == destroyConfirm) {
+			continue
+		}
+		key := fmt.Sprintf("%s|%s|%d|%s|%s", n.Target.Type, n.Target.Host, n.Target.Port, n.Target.User, n.Target.IdentityFile)
+		if _, ok := networkTargets[key]; ok {
+			continue
+		}
+		tgt, terr := resolveTargetForNode(&n)
+		if terr != nil {
+			targetFailures = append(targetFailures, failure{Name: n.Name, Error: "target cleanup: " + terr.Error()})
+			failedTargetKeys[key] = true
+			continue
+		}
+		networkTargets[key] = tgt
+		defer closeTarget(tgt)
+	}
+
 	var removed []string
 	var failures []failure
+	failures = append(failures, targetFailures...)
 	auditResult := "success"
 	auditTarget := ""
 
@@ -110,6 +135,10 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		if !(strings.HasPrefix(n.Name, prefix) || n.Name == destroyConfirm) {
 			continue
 		}
+		key := fmt.Sprintf("%s|%s|%d|%s|%s", n.Target.Type, n.Target.Host, n.Target.Port, n.Target.User, n.Target.IdentityFile)
+		if failedTargetKeys[key] {
+			continue
+		}
 		auditTarget = n.Target.Type // any matching node's type — they're all the same in practice
 
 		tgt, terr := resolveTargetForNode(&n)
@@ -117,7 +146,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			failures = append(failures, failure{Name: n.Name, Error: terr.Error()})
 			continue
 		}
-		rt := runtime.NewDockerRuntime(tgt, workDir)
+		rt := resolveRuntimeForNode(&n, tgt)
 		if rerr := rt.Remove(cmd.Context(), n.Name, true); rerr != nil {
 			failures = append(failures, failure{Name: n.Name, Error: rerr.Error()})
 			closeTarget(tgt)
@@ -135,10 +164,12 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			"failed to persist state after destroy: "+err.Error())
 	}
 
-	// Remove monitoring stack if it exists (best-effort).
-	monRT := runtime.NewMonitoringRuntime(target.NewLocalTarget(), paths.Deployments())
-	if err := monRT.Remove(cmd.Context(), destroyConfirm, true); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to remove monitoring stack: %v\n", err)
+	// Remove monitoring stack if it exists (best-effort) on the recorded target.
+	for _, networkTarget := range networkTargets {
+		monRT := runtime.NewMonitoringRuntime(networkTarget, paths.Deployments())
+		if err := monRT.Remove(cmd.Context(), destroyConfirm, true); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to remove monitoring stack: %v\n", err)
+		}
 	}
 
 	// Tear down the shared docker network the matching `network create`
@@ -146,23 +177,9 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	// run (create re-uses it), so we ignore failures rather than
 	// surfacing them as the destroy result.
 	if len(removed) > 0 {
-		// Resolve a target for the network rm. We just used one for
-		// each node above; either is fine — re-pick from the first
-		// node we just removed.
-		for _, n := range deployState.Nodes {
-			if n.Name == removed[0] {
-				if tgt, terr := resolveTargetForNode(&n); terr == nil {
-					_, _ = tgt.Exec(cmd.Context(), "docker", "network", "rm", "trond-"+destroyConfirm)
-					closeTarget(tgt)
-				}
-				break
-			}
+		for _, networkTarget := range networkTargets {
+			_, _ = networkTarget.Exec(cmd.Context(), "docker", "network", "rm", "trond-"+destroyConfirm)
 		}
-		// We also try a local-target rm even if no surviving node remained
-		// in state (the loop above iterates the post-RemoveNode state),
-		// since the most common case is "all nodes removed, no entries
-		// left." Falls back silently.
-		_, _ = target.NewLocalTarget().Exec(cmd.Context(), "docker", "network", "rm", "trond-"+destroyConfirm)
 	}
 
 	if len(failures) > 0 {
@@ -206,6 +223,17 @@ func resolveTargetForNode(n *state.ManagedNode) (target.Target, error) {
 	default:
 		return target.NewLocalTarget(), nil
 	}
+}
+
+func resolveRuntimeForNode(n *state.ManagedNode, tgt target.Target) runtime.Runtime {
+	if n.Runtime == "jar" {
+		jr := runtime.NewJarRuntime(tgt)
+		if n.InstallPath != "" {
+			jr.SetPurgeInstallPath(n.InstallPath)
+		}
+		return jr
+	}
+	return runtime.NewDockerRuntime(tgt, paths.Deployments())
 }
 
 func closeTarget(t target.Target) {

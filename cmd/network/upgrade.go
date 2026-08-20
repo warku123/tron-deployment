@@ -1,7 +1,9 @@
 package network
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,6 +71,8 @@ var (
 	upgradeWitnessFirst  bool
 	upgradeVerifyTimeout time.Duration
 	upgradeIntentPath    string
+	upgradeJarURL        string
+	upgradeJarSHA256     string
 )
 
 func init() {
@@ -82,6 +86,8 @@ func init() {
 		"Per-node verify timeout passed through to `trond verify`")
 	upgradeCmd.Flags().StringVar(&upgradeIntentPath, "intent", "",
 		"Path to the original intent.yaml used by `network create` (required for verify)")
+	upgradeCmd.Flags().StringVar(&upgradeJarURL, "jar-url", "", "Target-version JAR URL (jar runtime)")
+	upgradeCmd.Flags().StringVar(&upgradeJarSHA256, "jar-sha256", "", "Optional target-version JAR SHA256 (jar runtime)")
 	if err := upgradeCmd.MarkFlagRequired("version"); err != nil {
 		panic(err)
 	}
@@ -154,7 +160,14 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 
 	for _, node := range order {
 		stepStart := time.Now()
-		err := runChild(cmd.Context(), exe, "upgrade", node, "--version", upgradeVersion, "--auto-approve")
+		upgradeArgs := []string{"upgrade", node, "--version", upgradeVersion}
+		if upgradeJarURL != "" {
+			upgradeArgs = append(upgradeArgs, "--jar-url", upgradeJarURL)
+		}
+		if upgradeJarSHA256 != "" {
+			upgradeArgs = append(upgradeArgs, "--jar-sha256", upgradeJarSHA256)
+		}
+		err := runChild(cmd.Context(), exe, upgradeArgs...)
 		steps = append(steps, upgradeStep{
 			Node:       node,
 			Phase:      "upgrade",
@@ -242,9 +255,58 @@ var runChild = runChildCommand
 func runChildCommand(ctx context.Context, exe string, argv ...string) error {
 	argv = append(argv, "--output", "json")
 	cmd := exec.CommandContext(ctx, exe, argv...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	var stdout, stderr limitedBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if stderr.Len() > 0 {
+			suffix := ""
+			if stderr.limited || stderr.total > 1<<20 || stderr.Len() >= 1<<20 {
+				suffix = " [truncated at 1MiB]"
+			}
+			text := stderr.String()
+			if (stderr.limited || stderr.total > 1<<20 || stderr.Len() >= 1<<20) && len(text) > 256 {
+				text = text[:256]
+			}
+			return fmt.Errorf("child command failed: %w: %s%s", err, text, suffix)
+		}
+		return err
+	}
+	var value any
+	if err := json.Unmarshal(stdout.Bytes(), &value); err != nil {
+		return fmt.Errorf("child command returned invalid JSON: %w", err)
+	}
+	if _, ok := value.(map[string]any); !ok {
+		return fmt.Errorf("child command returned JSON that is not an object")
+	}
+	if stdout.limited || stderr.limited {
+		return fmt.Errorf("child command output exceeds 1MiB limit")
+	}
+	return nil
+}
+
+type limitedBuffer struct {
+	bytes.Buffer
+	limited bool
+	total   int
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	const max = 1 << 20
+	b.total += len(p)
+	if b.total > max {
+		b.limited = true
+	}
+	if b.Len() >= max {
+		b.limited = true
+		return len(p), nil
+	}
+	if len(p) > max-b.Len() {
+		_, _ = b.Buffer.Write(p[:max-b.Len()])
+		b.limited = true
+		return len(p), nil
+	}
+	return b.Buffer.Write(p)
 }
 
 // verifyNode projects the multi-node intent to the node being upgraded before

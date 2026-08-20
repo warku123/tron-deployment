@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	applypkg "github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/guard"
@@ -17,7 +18,6 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/render"
-	"github.com/tronprotocol/tron-deployment/internal/runtime"
 	"github.com/tronprotocol/tron-deployment/internal/state"
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
@@ -175,73 +175,31 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// If the network already has monitoring deployed, auto-enable metrics
-	// for the new node so Prometheus can scrape it.
+	// for the new node so Prometheus can scrape it. Check the target itself;
+	// SSH deployments keep this compose file on the remote host.
 	monCompose := filepath.Join(paths.Deployments(), addNetworkName+"-monitoring", "docker-compose.yaml")
-	if _, err := os.Stat(monCompose); err == nil {
+	if _, err := tgt.ReadFile(cmd.Context(), monCompose); err == nil {
 		enabled := true
 		parsed.Monitoring = &intent.Monitoring{Enabled: &enabled}
 		intent.ApplyMonitoringDefaults(parsed.Monitoring)
 	}
 
-	templateDir := findTemplatesDir()
-	rendered, err := render.RenderHOCONWithSecrets(templateDir, parsed, node)
+	clone := *parsed
+	clone.Name = nodeName
+	clone.Nodes = []intent.NodeSpec{*node}
+	data, err := yaml.Marshal(&clone)
 	if err != nil {
-		return fmt.Errorf("render config: %w", err)
+		return fmt.Errorf("hash add intent: %w", err)
 	}
-	// Deploy path — needs the real witness key inlined.
-	hocon := rendered.Deployable()
-
-	memGB, err := render.ParseMemoryGB(node.Resources.Memory)
-	if err != nil {
-		return output.NewError("VALIDATION_ERROR", output.ExitValidationError,
-			fmt.Sprintf("invalid resources.memory %q: %v", node.Resources.Memory, err))
-	}
-	jvmArgs := render.JVMArgsString(memGB, 17, node.JVM)
-	composeYAML := render.RenderCompose(nodeName, parsed, node, "", jvmArgs, "")
-
-	rt := runtime.NewDockerRuntime(tgt, paths.Deployments())
-	opts := runtime.DeployOpts{
-		Name:        nodeName,
-		ConfigData:  []byte(hocon),
-		ComposeData: []byte(composeYAML),
-	}
-	if err := rt.Deploy(cmd.Context(), opts); err != nil {
-		return output.NewError("DEPLOY_ERROR", output.ExitGeneralError, err.Error())
-	}
-
-	store.UpsertNode(deployState, state.ManagedNode{
-		Name:    nodeName,
-		Version: node.Version,
-		// Record the network kind (mainnet|nile|private) so the C1
-		// is_private fact and the --require-private guard work for added
-		// nodes too — without this they'd read as legacy/unknown and a
-		// private-net node would be fail-safe-refused by every mutator.
-		Network: parsed.Network,
-		// Persist the FULL target so subsequent stop/start/files/inspect
-		// can rebuild the SSH connection. Earlier this only stored
-		// Type, leaving Host/User/Port/IdentityFile blank — which then
-		// silently fell through to LocalTarget on follow-up commands.
-		Target: state.NodeTarget{
-			Type:         parsed.Target.Type,
-			Host:         parsed.Target.Host,
-			User:         parsed.Target.User,
-			Port:         parsed.Target.Port,
-			IdentityFile: parsed.Target.IdentityFile,
-		},
-		Runtime:     "docker",
-		Status:      "running",
-		LastApplied: time.Now().UTC(),
-		HTTPPort:    node.Ports.HTTP,
-		GRPCPort:    node.Ports.GRPC,
-		P2PPort:     node.Ports.P2P,
-		MetricsPort: node.Ports.Metrics,
-		InstallPath: node.InstallPath,
-		StorageRoot: applypkg.StorageRootForNode(node, "docker", paths.Deployments(), nodeName),
-		Labels:      node.Labels,
+	_, err = applypkg.Apply(cmd.Context(), applypkg.Options{
+		Intent: &clone, Target: tgt, Store: store, State: deployState,
+		IntentHash: applypkg.IntentHashFromBytes(data), Existing: store.GetNode(deployState, nodeName),
+		TemplateDir: findTemplatesDir(), DeploymentsDir: paths.Deployments(), IntentPath: addIntentPath,
+		RequirePrivate: guard.Requested(),
+		SkipMonitoring: parsed.Monitoring != nil && parsed.Monitoring.Enabled != nil && *parsed.Monitoring.Enabled,
 	})
-	if err := store.Save(deployState); err != nil {
-		return output.NewError("STATE_ERROR", output.ExitGeneralError,
-			"failed to persist state: "+err.Error())
+	if err != nil {
+		return output.NewError("DEPLOY_ERROR", output.ExitGeneralError, err.Error())
 	}
 
 	// Reload monitoring stack to include the new node if already deployed.
@@ -330,7 +288,7 @@ func reloadNetworkMonitoring(ctx context.Context, networkName string, deployStat
 	monCompose := filepath.Join(monDir, networkName+"-monitoring", "docker-compose.yaml")
 
 	// Check if monitoring is deployed for this network.
-	if _, err := os.Stat(monCompose); err != nil {
+	if _, err := tgt.ReadFile(ctx, monCompose); err != nil {
 		return
 	}
 

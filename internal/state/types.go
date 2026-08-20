@@ -30,8 +30,11 @@ type ManagedNode struct {
 	// so probe commands (health, diagnose, verify) can target the right port
 	// without re-reading the intent file. Older state files predate these
 	// fields — callers must fall back to defaults when zero.
-	HTTPPort int `json:"http_port,omitempty"`
-	GRPCPort int `json:"grpc_port,omitempty"`
+	HTTPPort         int `json:"http_port,omitempty"`
+	GRPCPort         int `json:"grpc_port,omitempty"`
+	SolidityHTTPPort int `json:"solidity_http_port,omitempty"`
+	SolidityGRPCPort int `json:"solidity_grpc_port,omitempty"`
+	JSONRPCPort      int `json:"jsonrpc_port,omitempty"`
 	// P2PPort is the listen.port a sibling can dial to peer with this node.
 	// `network add` reads it from every existing entry to populate the new
 	// node's active_peers so it can immediately join the P2P mesh.

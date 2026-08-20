@@ -27,6 +27,21 @@ var (
 	createMonitor    bool
 )
 
+var createApply = apply.Apply
+var createTarget = func(parsed *intent.Intent) (target.Target, error) {
+	switch parsed.Target.Type {
+	case "ssh":
+		t := target.NewSSHTarget(parsed.Target.Host, parsed.Target.Port, parsed.Target.User, parsed.Target.IdentityFile)
+		if err := t.Connect(); err != nil {
+			return nil, err
+		}
+		return t, nil
+	default:
+		return target.NewLocalTarget(), nil
+	}
+}
+var createMonitoring = deployNetworkMonitoring
+
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a private network from an intent file",
@@ -68,19 +83,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		intent.ApplyMonitoringDefaults(parsed.Monitoring)
 	}
 
-	// Resolve target
-	var tgt target.Target
-	switch parsed.Target.Type {
-	case "ssh":
-		t := target.NewSSHTarget(parsed.Target.Host, parsed.Target.Port, parsed.Target.User, parsed.Target.IdentityFile)
-		if err := t.Connect(); err != nil {
-			return output.NewError("TARGET_UNREACHABLE", output.ExitTargetUnreachable, err.Error())
-		}
-		defer t.Close()
-		tgt = t
-	default:
-		tgt = target.NewLocalTarget()
+	// Resolve target.
+	tgt, err := createTarget(parsed)
+	if err != nil {
+		return output.NewError("TARGET_UNREACHABLE", output.ExitTargetUnreachable, err.Error())
 	}
+	defer closeTarget(tgt)
 
 	templateDir := findTemplatesDir()
 	workDir := paths.Deployments()
@@ -151,7 +159,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
 		}
-		res, err := apply.Apply(cmd.Context(), apply.Options{
+		res, err := createApply(cmd.Context(), apply.Options{
 			Intent:         sub,
 			Target:         tgt,
 			Store:          store,
@@ -199,6 +207,14 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		"network": parsed.Name,
 		"nodes":   deployed,
 	}
+	failed := countFailedDeployments(deployed)
+	if failed > 0 {
+		result["status"] = "failed"
+		output.WriteJSON(os.Stdout, result)
+		return output.NewError("DEPLOY_ERROR", output.ExitGeneralError,
+			fmt.Sprintf("%d node(s) failed to deploy", failed))
+	}
+	result["status"] = "success"
 
 	// Deploy monitoring stack only when --monitor flag is explicitly passed.
 	if createMonitor {
@@ -208,7 +224,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		parsed.Monitoring.Enabled = intent.BoolPtr(true)
 		intent.ApplyMonitoringDefaults(parsed.Monitoring)
 
-		monResult := deployNetworkMonitoring(cmd.Context(), tgt, workDir, parsed)
+		monResult := createMonitoring(cmd.Context(), tgt, workDir, parsed)
 		if monResult.error != "" {
 			result["monitoring_error"] = monResult.error
 		} else {
@@ -230,6 +246,16 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	output.WriteJSON(os.Stdout, result)
 	return nil
+}
+
+func countFailedDeployments(nodes []map[string]any) int {
+	failed := 0
+	for _, node := range nodes {
+		if node["status"] == "error" {
+			failed++
+		}
+	}
+	return failed
 }
 
 // autoWireActivePeers fills each node's network_overrides.active_peers

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -120,5 +121,56 @@ func TestFinishWithFailureRollsBackNodeWhoseVerifyFailed(t *testing.T) {
 	}
 	if len(rollbackNodes) != 1 || rollbackNodes[0] != "net-node0" {
 		t.Fatalf("rollback nodes = %v, want [net-node0]", rollbackNodes)
+	}
+}
+
+func TestRunChildCommandRejectsNonJSONOutput(t *testing.T) {
+	err := runChildCommand(context.Background(), "/bin/sh", "-c", "printf not-json")
+	if err == nil || !strings.Contains(err.Error(), "invalid JSON") {
+		t.Fatalf("error = %v, want invalid JSON", err)
+	}
+}
+
+func TestRunChildCommandRejectsNonObjectJSON(t *testing.T) {
+	for _, value := range []string{"null", "1", "[]"} {
+		t.Run(value, func(t *testing.T) {
+			err := runChildCommand(context.Background(), "/bin/sh", "-c", "printf '%s' '"+value+"'")
+			if err == nil || !strings.Contains(err.Error(), "not an object") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRunChildCommandMarksTruncatedStderr(t *testing.T) {
+	err := runChildCommand(context.Background(), "python3", "-c", "import sys; sys.stderr.write('x'*1100001); sys.exit(1)")
+	if err == nil || !strings.Contains(err.Error(), "[truncated at 1MiB]") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLimitedBufferTracksOverflow(t *testing.T) {
+	var b limitedBuffer
+	_, _ = b.Write(make([]byte, (1<<20)+1))
+	if !b.limited || b.total <= 1<<20 || b.Len() != 1<<20 {
+		t.Fatalf("buffer state limited=%v total=%d len=%d", b.limited, b.total, b.Len())
+	}
+}
+
+func TestFinishWithFailureDoesNotPassUpgradeJarArgumentsToRollback(t *testing.T) {
+	oldAuto, oldURL, oldSHA, oldRun := upgradeAutoRollback, upgradeJarURL, upgradeJarSHA256, runChild
+	defer func() {
+		upgradeAutoRollback, upgradeJarURL, upgradeJarSHA256, runChild = oldAuto, oldURL, oldSHA, oldRun
+	}()
+	upgradeAutoRollback, upgradeJarURL, upgradeJarSHA256 = true, "https://example/jar", "abc"
+	var got []string
+	runChild = func(_ context.Context, _ string, argv ...string) error {
+		got = append([]string(nil), argv...)
+		return nil
+	}
+	_ = finishWithFailure(context.Background(), "", "net", "trond", nil, []string{"net-node0"}, time.Now(), "net-node1", errors.New("failed"))
+	want := []string{"rollback", "net-node0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rollback args = %v, want %v", got, want)
 	}
 }

@@ -136,7 +136,11 @@ func runRender(cmd *cobra.Command, args []string) error {
 		// the rendered bodies inline; that doesn't preclude also
 		// writing them.
 		if renderOutputDir != "" {
-			if err := writeRenderedFiles(renderOutputDir, parsed.Name, hocon, composeYAML, systemdUnit); err != nil {
+			nodeDir := renderOutputDir
+			if len(parsed.Nodes) > 1 {
+				nodeDir = filepath.Join(renderOutputDir, fmt.Sprintf("node%d", i))
+			}
+			if err := writeRenderedFiles(nodeDir, parsed.Name, hocon, composeYAML, systemdUnit); err != nil {
 				return err
 			}
 		}

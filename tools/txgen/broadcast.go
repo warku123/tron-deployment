@@ -103,11 +103,25 @@ func runBroadcast(ctx context.Context, cfg *Config) error {
 		wg.Add(1)
 		go func(lane int) {
 			defer wg.Done()
-			for item := range work {
+			for {
+				var item [2]string
+				var ok bool
+				select {
+				case item, ok = <-work:
+				case <-ctx.Done():
+					return
+				}
+				if !ok {
+					return
+				}
 				if ctx.Err() != nil {
 					return
 				}
-				<-tokens
+				select {
+				case <-tokens:
+				case <-ctx.Done():
+					return
+				}
 				ok, msg := tr.Broadcast(ctx, lane, []byte(item[1]))
 				if ok {
 					okCount.Add(1)
@@ -133,7 +147,7 @@ func runBroadcast(ctx context.Context, cfg *Config) error {
 	startTime := time.Now()
 	total := 0
 	for _, path := range files {
-		n, err := streamCSV(path, work)
+		n, err := streamCSVContext(ctx, path, work)
 		if err != nil {
 			log.Printf("broadcast: read %s: %v", path, err)
 		}
@@ -176,6 +190,10 @@ func runBroadcast(ctx context.Context, cfg *Config) error {
 // streamCSV reads `path` (skipping the header) and pushes (txID, json)
 // pairs onto out. Returns the number of rows pushed.
 func streamCSV(path string, out chan<- [2]string) (int, error) {
+	return streamCSVContext(context.Background(), path, out)
+}
+
+func streamCSVContext(ctx context.Context, path string, out chan<- [2]string) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -201,10 +219,19 @@ func streamCSV(path string, out chan<- [2]string) (int, error) {
 		if len(rec) < 2 {
 			continue
 		}
-		out <- [2]string{rec[0], rec[1]}
+		select {
+		case out <- [2]string{rec[0], rec[1]}:
+		case <-ctx.Done():
+			return count, ctx.Err()
+		}
 		count++
 	}
 	return count, nil
+}
+
+func runCSVProducer(ctx context.Context, path string, out chan<- [2]string, done chan<- struct{}) {
+	defer close(done)
+	_, _ = streamCSVContext(ctx, path, out)
 }
 
 func truncate(s string, n int) string {
