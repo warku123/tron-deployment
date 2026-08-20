@@ -166,6 +166,10 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 			return finishWithFailure(cmd.Context(), outputFmt, networkName, exe,
 				steps, upgraded, start, node, err)
 		}
+		// The artifact has been changed successfully. Keep this node in the
+		// rollback set before verification: a failed health check still means
+		// this node was mutated and must be restored by --auto-rollback.
+		upgraded = append(upgraded, node)
 
 		stepStart = time.Now()
 		err = verifyNode(cmd.Context(), exe, node, upgradeIntentPath, upgradeVerifyTimeout)
@@ -181,7 +185,6 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 				steps, upgraded, start, node, err)
 		}
 
-		upgraded = append(upgraded, node)
 	}
 
 	result := map[string]any{

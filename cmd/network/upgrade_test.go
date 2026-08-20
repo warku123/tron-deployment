@@ -94,3 +94,31 @@ nodes:
 		t.Fatalf("verify calls = %d, want 2", len(calls))
 	}
 }
+
+func TestFinishWithFailureRollsBackNodeWhoseVerifyFailed(t *testing.T) {
+	oldAutoRollback := upgradeAutoRollback
+	oldRunChild := runChild
+	defer func() {
+		upgradeAutoRollback = oldAutoRollback
+		runChild = oldRunChild
+	}()
+	upgradeAutoRollback = true
+	var rollbackNodes []string
+	runChild = func(_ context.Context, _ string, argv ...string) error {
+		if len(argv) >= 2 && argv[0] == "rollback" {
+			rollbackNodes = append(rollbackNodes, argv[1])
+		}
+		return nil
+	}
+
+	err := finishWithFailure(context.Background(), "", "net", "trond",
+		[]upgradeStep{{Node: "net-node0", Phase: "upgrade", Status: "ok"},
+			{Node: "net-node0", Phase: "verify", Status: "failed"}},
+		[]string{"net-node0"}, time.Now(), "net-node0", errors.New("verify failed"))
+	if err == nil || !strings.Contains(err.Error(), "net-node0") {
+		t.Fatalf("error = %v, want failed node", err)
+	}
+	if len(rollbackNodes) != 1 || rollbackNodes[0] != "net-node0" {
+		t.Fatalf("rollback nodes = %v, want [net-node0]", rollbackNodes)
+	}
+}
