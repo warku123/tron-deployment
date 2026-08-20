@@ -22,12 +22,23 @@ type nodeContext struct {
 	Node    *state.ManagedNode
 	Target  target.Target
 	Runtime runtime.Runtime
+
+	// lock is held for the whole load-modify-save cycle. Every command
+	// built on a nodeContext reads state here and writes it back through
+	// SaveState, sometimes many seconds later, so the read and the write
+	// have to sit inside one lock or a concurrent trond drops one of the
+	// two updates.
+	lock *state.Lock
 }
 
-// Close releases resources (e.g., SSH connections).
+// Close releases the state lock and any resources (e.g., SSH connections).
 func (nc *nodeContext) Close() {
 	if closer, ok := nc.Target.(interface{ Close() error }); ok {
 		closer.Close()
+	}
+	if nc.lock != nil {
+		nc.lock.Release()
+		nc.lock = nil
 	}
 }
 
@@ -104,20 +115,54 @@ func requirePrivateForNodes(names ...string) error {
 	return guard.EnforceNodes(refs)
 }
 
-// resolveNodeContext loads a node from state and constructs its target and runtime.
+// resolveNodeContext loads a node from state without keeping the state
+// lock. Use it for commands that only read — logs, wait, exec, files,
+// health, diagnose, verify-config. Holding the exclusive lock across
+// those buys nothing, and `logs -f` or a long `wait` would keep every
+// other trond process on the host blocked for as long as it runs.
 func resolveNodeContext(name string) (*nodeContext, error) {
+	return resolveNode(name, false)
+}
+
+// resolveNodeContextForWrite loads a node and keeps the state lock until
+// Close. Commands that write the node list back — start, stop, restart,
+// upgrade, rollback, heal, remove — need the read and the write inside
+// one lock, or a concurrent trond drops one of the two updates.
+func resolveNodeContextForWrite(name string) (*nodeContext, error) {
+	return resolveNode(name, true)
+}
+
+func resolveNode(name string, forWrite bool) (*nodeContext, error) {
 	store, err := state.NewStore(statePath())
 	if err != nil {
 		return nil, err
 	}
 
+	// A writer takes the lock before the read and holds it until Close,
+	// so the load-modify-save cycle is atomic. A reader takes nothing:
+	// the load below is a single Load() and nothing is written back.
+	var lock *state.Lock
+	if forWrite {
+		lock = state.NewLock(stateDir())
+		if err := acquireStateLock(lock); err != nil {
+			return nil, err
+		}
+	}
+	release := func() {
+		if lock != nil {
+			lock.Release()
+		}
+	}
+
 	deployState, err := store.Load()
 	if err != nil {
+		release()
 		return nil, err
 	}
 
 	node := store.GetNode(deployState, name)
 	if node == nil {
+		release()
 		return nil, exitWithError("NODE_NOT_FOUND", output.ExitGeneralError,
 			fmt.Sprintf("Node %q not found in state", name),
 			"Run: trond list",
@@ -126,6 +171,7 @@ func resolveNodeContext(name string) (*nodeContext, error) {
 
 	tgt, err := resolveTargetFromNode(node)
 	if err != nil {
+		release()
 		return nil, exitWithError("TARGET_UNREACHABLE", output.ExitTargetUnreachable, err.Error())
 	}
 
@@ -137,6 +183,7 @@ func resolveNodeContext(name string) (*nodeContext, error) {
 		Node:    node,
 		Target:  tgt,
 		Runtime: rt,
+		lock:    lock,
 	}, nil
 }
 
@@ -212,5 +259,38 @@ func writeAudit(ev auditEvent) {
 	}
 	if writeErr := al.Write(entry); writeErr != nil {
 		Log().Warn("audit log write failed", "error", writeErr)
+	}
+}
+
+// stateLockTimeout bounds how long a command waits for the state lock.
+// Long enough that a normal deploy finishing up is simply waited out,
+// short enough that a stuck or forgotten process is reported rather
+// than leaving the caller staring at a hung terminal.
+const stateLockTimeout = 30 * time.Second
+
+// acquireStateLock waits for the lock, but not forever. syscall.Flock
+// with LOCK_EX blocks with no deadline, so the wait happens on a
+// goroutine and the caller gives up after stateLockTimeout with an
+// error that says what to do about it.
+func acquireStateLock(lock *state.Lock) error {
+	done := make(chan error, 1)
+	go func() { done <- lock.Acquire() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return exitWithError("LOCK_ERROR", output.ExitGeneralError,
+				"Failed to acquire state lock: "+err.Error(),
+				"Check if another trond process is running")
+		}
+		return nil
+	case <-time.After(stateLockTimeout):
+		// The goroutine keeps waiting and will release on process exit;
+		// the lock file is a shared resource, so abandoning the attempt
+		// is safe.
+		return exitWithError("LOCK_TIMEOUT", output.ExitGeneralError,
+			fmt.Sprintf("Another trond process has held the state lock for %s", stateLockTimeout),
+			"Find it with: ps aux | grep trond",
+			"A stuck process can be ended; the lock is released when it exits")
 	}
 }
