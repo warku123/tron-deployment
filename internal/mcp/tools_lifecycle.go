@@ -70,11 +70,7 @@ func planTool(ctx context.Context, _ *mcp.CallToolRequest, args planArg) (*mcp.C
 		return errResult(err)
 	}
 	node := &parsed.Nodes[0]
-	store, err := state.NewStore(paths.State())
-	if err != nil {
-		return errResult(output.NewError("STATE_ERROR", output.ExitGeneralError, err.Error()))
-	}
-	st, err := store.Load()
+	store, st, err := state.Load(paths.State())
 	if err != nil {
 		return errResult(output.NewError("STATE_ERROR", output.ExitGeneralError, err.Error()))
 	}
@@ -161,11 +157,7 @@ func applyTool(ctx context.Context, _ *mcp.CallToolRequest, args applyArgs) (*mc
 	}
 	defer lock.Release()
 
-	store, err := state.NewStore(paths.State())
-	if err != nil {
-		return errResult(err)
-	}
-	st, err := store.Load()
+	store, st, err := state.Load(paths.State())
 	if err != nil {
 		return errResult(err)
 	}
@@ -254,16 +246,7 @@ func enforcePrivateForRecordedNode(requested bool, name string) error {
 // internal/mcp package doesn't import cmd/. Limited to local + ssh
 // since those are the only two intent.Target.Type values.
 func resolveTarget(parsed *intent.Intent) (target.Target, error) {
-	switch parsed.Target.Type {
-	case "ssh":
-		t := target.NewSSHTarget(parsed.Target.Host, parsed.Target.Port, parsed.Target.User, parsed.Target.IdentityFile)
-		if err := t.Connect(); err != nil {
-			return nil, err
-		}
-		return t, nil
-	default:
-		return target.NewLocalTarget(), nil
-	}
+	return target.FromIntent(parsed)
 }
 
 // resolveEnvVars mirrors cmd/apply.go's helper for the same reason.

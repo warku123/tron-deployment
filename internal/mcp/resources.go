@@ -176,7 +176,7 @@ func readNodeConfResource(ctx context.Context, req *mcp.ReadResourceRequest) (*m
 	if err != nil {
 		return nil, err
 	}
-	tgt, err := mcpResolveTargetFromNode(node)
+	tgt, err := target.FromManagedNode(node)
 	if err != nil {
 		return nil, err
 	}

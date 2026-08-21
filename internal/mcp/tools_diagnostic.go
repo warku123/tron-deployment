@@ -122,10 +122,7 @@ func doctorStateFile() map[string]any {
 	}
 	st, err := store.Load()
 	if err != nil {
-		return map[string]any{
-			"name": "state.json", "status": "fail",
-			"message": "parse: " + err.Error(),
-		}
+		return map[string]any{"name": "state.json", "status": "fail", "message": "parse: " + err.Error()}
 	}
 	return map[string]any{
 		"name":    "state.json",
@@ -157,11 +154,7 @@ func doctorDockerCLI(ctx context.Context) map[string]any {
 }
 
 func healthTool(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*mcp.CallToolResult, any, error) {
-	store, err := state.NewStore(paths.State())
-	if err != nil {
-		return errResult(err)
-	}
-	st, err := store.Load()
+	store, st, err := state.Load(paths.State())
 	if err != nil {
 		return errResult(err)
 	}
@@ -178,7 +171,7 @@ func healthTool(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*mcp
 	// Probe through the node's target (SSH-tunnelled for remote nodes),
 	// not via http.DefaultClient against this host's loopback — that
 	// bypassed SSH entirely and always failed for remote rigs.
-	tgt, err := mcpResolveTargetFromNode(node)
+	tgt, err := target.FromManagedNode(node)
 	if err != nil {
 		return errResult(err)
 	}
@@ -217,11 +210,7 @@ func diagnoseTool(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*m
 	// `trond diagnose <name>` does, by reaching into
 	// internal/diagnosis directly. The earlier MCP version returned
 	// only a state-only subset; that gap is now closed.
-	store, err := state.NewStore(paths.State())
-	if err != nil {
-		return errResult(err)
-	}
-	st, err := store.Load()
+	store, st, err := state.Load(paths.State())
 	if err != nil {
 		return errResult(err)
 	}
@@ -230,7 +219,7 @@ func diagnoseTool(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*m
 		return errResult(notFound("diagnose", args.Name))
 	}
 
-	tgt, err := mcpResolveTargetFromNode(node)
+	tgt, err := target.FromManagedNode(node)
 	if err != nil {
 		return errResult(err)
 	}

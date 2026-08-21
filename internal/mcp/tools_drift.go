@@ -12,6 +12,7 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/render"
 	"github.com/tronprotocol/tron-deployment/internal/state"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 // registerDriftTools wires the verify_config tool — the MCP-side
@@ -47,20 +48,15 @@ func verifyConfigTool(ctx context.Context, _ *mcp.CallToolRequest, args verifyCo
 		return errResult(err)
 	}
 
-	store, err := state.NewStore(paths.State())
+	_, _, node, err := state.LoadNode(paths.State(), args.Name)
 	if err != nil {
 		return errResult(err)
 	}
-	st, err := store.Load()
-	if err != nil {
-		return errResult(err)
-	}
-	node := store.GetNode(st, args.Name)
 	if node == nil {
 		return errResult(notFound("verify_config", args.Name))
 	}
 
-	tgt, err := mcpResolveTargetFromNode(node)
+	tgt, err := target.FromManagedNode(node)
 	if err != nil {
 		return errResult(err)
 	}
