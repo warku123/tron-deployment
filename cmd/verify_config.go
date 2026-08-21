@@ -14,6 +14,7 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/render"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 // `trond verify-config <node> --intent <path>` answers the question:
@@ -83,7 +84,13 @@ func runVerifyConfig(cmd *cobra.Command, args []string) error {
 	// the binary's working dir holds it under conf/.
 	ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Second)
 	defer cancel()
-	live, err := readLiveConfig(ctx, nc, name)
+	live, err := target.ReadLiveConfig(ctx, nc.Target, nc.Node)
+	if err != nil && nc.Node.Runtime == "jar" {
+		path := filepath.Join(nc.Node.InstallPath, "conf", name+".conf")
+		err = fmt.Errorf("read %s: %w", path, err)
+	} else if err != nil {
+		err = fmt.Errorf("docker exec cat: %w", err)
+	}
 	if err != nil {
 		return exitWithError("LIVE_CONFIG_UNREACHABLE", output.ExitGeneralError, err.Error(),
 			"Confirm the node is running: trond status "+name,
@@ -126,29 +133,6 @@ func runVerifyConfig(cmd *cobra.Command, args []string) error {
 		fmt.Println(d)
 	}
 	return nil
-}
-
-// readLiveConfig returns the bytes of the conf file currently used by
-// the running node, regardless of runtime. For docker, we cat the
-// file inside the container; for jar, we read from the on-disk
-// working directory.
-func readLiveConfig(ctx context.Context, nc *nodeContext, name string) (string, error) {
-	if nc.Node.Runtime == "jar" {
-		// Jar runtime keeps the conf under the install_path's conf/.
-		path := filepath.Join(nc.Node.InstallPath, "conf", name+".conf")
-		out, err := nc.Target.Exec(ctx, "cat", path)
-		if err != nil {
-			return "", fmt.Errorf("read %s: %w", path, err)
-		}
-		return string(out), nil
-	}
-	// Default: docker. java-tron images mount the conf at
-	// /java-tron/conf/<name>.conf (set by render.RenderCompose).
-	out, err := nc.runtimeExec(ctx, "cat", render.ContainerConfDir+"/"+name+".conf")
-	if err != nil {
-		return "", fmt.Errorf("docker exec cat: %w", err)
-	}
-	return string(out), nil
 }
 
 func countLines(s string) int {
