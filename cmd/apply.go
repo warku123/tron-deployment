@@ -167,7 +167,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		Existing:       existing,
 		TemplateDir:    apply.FindTemplatesDir(),
 		DeploymentsDir: deploymentsDir(),
-		EnvVars:        resolveEnvVars(&parsed.Nodes[0]),
+		EnvVars:        apply.ResolveEnvVars(&parsed.Nodes[0]),
 		IntentPath:     applyIntentPath, // FR-021: relative build.source resolves vs this
 		Wait:           applyWait,
 		WaitTimeout:    applyWaitTimeout,
@@ -228,19 +228,6 @@ func resolveTarget(parsed *intent.Intent) (target.Target, error) {
 		return target.NewLocalTarget(), nil
 	}
 }
-
-func resolveEnvVars(node *intent.NodeSpec) map[string]string {
-	env := make(map[string]string)
-	if node.WitnessKeyEnv != "" {
-		val := os.Getenv(node.WitnessKeyEnv)
-		if val != "" {
-			env[node.WitnessKeyEnv] = val
-		}
-	}
-	return env
-}
-
-func findTemplatesDir() string { return apply.FindTemplatesDir() }
 
 // exitWithError returns a StructuredError for propagation through cobra RunE.
 func exitWithError(code string, exitCode int, msg string, suggestions ...string) error {

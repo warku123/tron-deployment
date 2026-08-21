@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/render"
@@ -92,14 +93,14 @@ func runVerifyConfig(cmd *cobra.Command, args []string) error {
 	// Render what trond *would* produce from the current intent. The
 	// comparison runs against the REAL bytes (redacting here would make
 	// every witness node report permanent false drift against its live
-	// conf); lineDiff redacts each line as it emits it.
-	renderedDesired, err := render.RenderHOCONWithSecrets(findTemplatesDir(), parsed, &parsed.Nodes[0])
+	// conf); render.DiffText redacts each line as it emits it.
+	renderedDesired, err := render.RenderHOCONWithSecrets(apply.FindTemplatesDir(), parsed, &parsed.Nodes[0])
 	if err != nil {
 		return exitWithError("RENDER_ERROR", output.ExitGeneralError, err.Error())
 	}
 	desired := renderedDesired.Deployable()
 
-	diffs := lineDiff(live, desired, verifyConfigContext)
+	diffs := render.DiffText(live, desired, verifyConfigContext)
 	result := map[string]any{
 		"name":          name,
 		"intent":        parsed.Name,
@@ -148,68 +149,6 @@ func readLiveConfig(ctx context.Context, nc *nodeContext, name string) (string, 
 		return "", fmt.Errorf("docker exec cat: %w", err)
 	}
 	return string(out), nil
-}
-
-// lineDiff returns a list of diff lines marking '+'/'−' changes
-// between live and desired. We use a deliberately simple LCS-free
-// algorithm — trond's HOCON files are <500 lines and the consumers
-// of this output are agents that key off `in_sync`/`diff_count`,
-// not humans diffing big patches. The unified-diff formatting is
-// precise enough for the operator-friendly text path.
-//
-// Secret handling: BOTH sides carry the real witness key — `live` is
-// read off the deployed host and `desired` is the deployable render —
-// so every emitted line, including the --context neighbours (which are
-// emitted even when they match), is passed through
-// render.RedactWitnessLine. Comparison still uses the raw lines, so a
-// rotated key is still counted in diff_count and flips in_sync.
-func lineDiff(live, desired string, contextLines int) []string {
-	a := strings.Split(strings.TrimRight(live, "\n"), "\n")
-	b := strings.Split(strings.TrimRight(desired, "\n"), "\n")
-	// Redact whole-slice: a multi-line `localwitness = [` array keeps its
-	// key on a line that does not itself start with the key name.
-	aR := render.RedactWitnessLines(a)
-	bR := render.RedactWitnessLines(b)
-	var diffs []string
-	max := len(a)
-	if len(b) > max {
-		max = len(b)
-	}
-	for i := 0; i < max; i++ {
-		var aLine, bLine string
-		if i < len(a) {
-			aLine = a[i]
-		}
-		if i < len(b) {
-			bLine = b[i]
-		}
-		if aLine == bLine {
-			continue
-		}
-		// Optional context: emit a few neighbours of equal lines for
-		// human readability when --context > 0. Agents typically
-		// pass context=0.
-		if contextLines > 0 {
-			lo := i - contextLines
-			if lo < 0 {
-				lo = 0
-			}
-			for j := lo; j < i; j++ {
-				if j < len(a) {
-					diffs = append(diffs, "  "+aR[j])
-				}
-			}
-		}
-		switch {
-		case i < len(a) && i >= len(b):
-			diffs = append(diffs, "- "+aR[i])
-		case i >= len(a) && i < len(b):
-			diffs = append(diffs, "+ "+bR[i])
-		default:
-			diffs = append(diffs, "- "+aR[i], "+ "+bR[i])
-		}
-	}
-	return diffs
 }
 
 func countLines(s string) int {

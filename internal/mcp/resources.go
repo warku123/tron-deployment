@@ -11,6 +11,7 @@ import (
 
 	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
+	"github.com/tronprotocol/tron-deployment/internal/render"
 	"github.com/tronprotocol/tron-deployment/internal/state"
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
@@ -198,7 +199,7 @@ func readNodeConfResource(ctx context.Context, req *mcp.ReadResourceRequest) (*m
 		Contents: []*mcp.ResourceContents{{
 			URI:      req.Params.URI,
 			MIMEType: "text/plain",
-			Text:     redactConfText(live),
+			Text:     strings.Join(render.RedactWitnessLines(strings.Split(live, "\n")), "\n"),
 		}},
 	}, nil
 }

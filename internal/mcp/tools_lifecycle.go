@@ -196,7 +196,7 @@ func applyTool(ctx context.Context, _ *mcp.CallToolRequest, args applyArgs) (*mc
 		Existing:       existing,
 		TemplateDir:    templateDir,
 		DeploymentsDir: paths.Deployments(),
-		EnvVars:        resolveEnvVars(&parsed.Nodes[0]),
+		EnvVars:        apply.ResolveEnvVars(&parsed.Nodes[0]),
 		Wait:           args.Wait,
 		WaitTimeout:    5 * time.Minute,
 		RequirePrivate: args.RequirePrivate || guard.Requested(),
@@ -247,18 +247,6 @@ func enforcePrivateForRecordedNode(requested bool, name string) error {
 // since those are the only two intent.Target.Type values.
 func resolveTarget(parsed *intent.Intent) (target.Target, error) {
 	return target.FromIntent(parsed)
-}
-
-// resolveEnvVars mirrors cmd/apply.go's helper for the same reason.
-// Pulls the witness key out of the operator's environment by name.
-func resolveEnvVars(node *intent.NodeSpec) map[string]string {
-	env := map[string]string{}
-	if node.WitnessKeyEnv != "" {
-		if v := os.Getenv(node.WitnessKeyEnv); v != "" {
-			env[node.WitnessKeyEnv] = v
-		}
-	}
-	return env
 }
 
 func ptrTrue() *bool { v := true; return &v }

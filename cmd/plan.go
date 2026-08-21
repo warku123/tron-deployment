@@ -97,8 +97,8 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	if planShowDiff && existing != nil {
 		deployedPath := filepath.Join(paths.Deployments(), parsed.Name, parsed.Name+".conf")
 		if data, err := os.ReadFile(deployedPath); err == nil {
-			diffLines = simpleHOCONDiff(strings.Split(string(data), "\n"),
-				strings.Split(string(planned.Config), "\n"))
+			diffLines = render.DiffLines(strings.Split(string(data), "\n"),
+				strings.Split(string(planned.Config), "\n"), 0)
 		}
 		// JSON consumers always get the field (possibly empty array)
 		// so they can distinguish "no changes" from "diff was not
@@ -116,48 +116,6 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-// simpleHOCONDiff is a deliberately tiny line-by-line differ. Same
-// shape as cmd/config/diff.go::simpleDiff but private to plan to
-// avoid coupling — both could call into a shared internal/diff
-// helper later if a third caller appears.
-//
-// Secret handling: the comparison runs on the raw lines (so a witness
-// key that actually changed is still reported as drift), but every
-// line is passed through render.RedactWitnessLine before it is
-// emitted. This differ is positional and LCS-free, so a line-count
-// change anywhere above the `localwitness` assignment misaligns the
-// tail and would otherwise push the SR private key straight into
-// stdout and into result["config_diff"].
-func simpleHOCONDiff(old, new []string) []string {
-	// Redact whole-slice: a multi-line `localwitness = [` array keeps its
-	// key on a line that does not itself start with the key name.
-	oldR := render.RedactWitnessLines(old)
-	newR := render.RedactWitnessLines(new)
-	var diffs []string
-	maxLen := len(old)
-	if len(new) > maxLen {
-		maxLen = len(new)
-	}
-	for i := 0; i < maxLen; i++ {
-		var oldLine, newLine string
-		if i < len(old) {
-			oldLine = old[i]
-		}
-		if i < len(new) {
-			newLine = new[i]
-		}
-		if oldLine != newLine {
-			if oldLine != "" {
-				diffs = append(diffs, "- "+oldR[i])
-			}
-			if newLine != "" {
-				diffs = append(diffs, "+ "+newR[i])
-			}
-		}
-	}
-	return diffs
 }
 
 // printDiffSection renders the line diff under the changes section
