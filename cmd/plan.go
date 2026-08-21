@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -95,7 +94,7 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	// (deployment dir cleaned, etc.).
 	var diffLines []string
 	if planShowDiff && existing != nil {
-		deployedPath := filepath.Join(paths.Deployments(), parsed.Name, parsed.Name+".conf")
+		deployedPath := paths.DeploymentConfig(parsed.Name)
 		if data, err := os.ReadFile(deployedPath); err == nil {
 			diffLines = render.DiffLines(strings.Split(string(data), "\n"),
 				strings.Split(string(planned.Config), "\n"), 0)

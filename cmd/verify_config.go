@@ -144,7 +144,7 @@ func readLiveConfig(ctx context.Context, nc *nodeContext, name string) (string, 
 	}
 	// Default: docker. java-tron images mount the conf at
 	// /java-tron/conf/<name>.conf (set by render.RenderCompose).
-	out, err := nc.runtimeExec(ctx, "cat", "/java-tron/conf/"+name+".conf")
+	out, err := nc.runtimeExec(ctx, "cat", render.ContainerConfDir+"/"+name+".conf")
 	if err != nil {
 		return "", fmt.Errorf("docker exec cat: %w", err)
 	}

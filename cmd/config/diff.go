@@ -3,11 +3,11 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
@@ -36,7 +36,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	// Render new config
-	templateDir := findTemplateDir()
+	templateDir := apply.FindTemplatesDir()
 	node := &parsed.Nodes[0]
 
 	rendered, err := render.RenderHOCONWithSecrets(templateDir, parsed, node)
@@ -73,7 +73,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try to read the deployed config
-	deployedConfigPath := filepath.Join(paths.Deployments(), parsed.Name, parsed.Name+".conf")
+	deployedConfigPath := paths.DeploymentConfig(parsed.Name)
 	deployedData, err := os.ReadFile(deployedConfigPath)
 	if err != nil {
 		if outputFmt == "json" {

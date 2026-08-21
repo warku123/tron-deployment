@@ -64,10 +64,13 @@ func composeEnvLines(node *intent.NodeSpec) []string {
 // (./bin/docker-entrypoint.sh) by spelling out `java -jar`. Containers
 // silently restart-looped as a result. This file is the corrected layout.
 const (
-	containerWorkdir   = "/java-tron"
-	containerConfigDir = containerWorkdir + "/conf"
-	containerDataDir   = containerWorkdir + "/output-directory"
-	containerLogDir    = containerWorkdir + "/logs"
+	ContainerWorkdir   = "/java-tron"
+	ContainerDataDir   = ContainerWorkdir + "/output-directory"
+	ContainerConfDir   = ContainerWorkdir + "/conf"
+	ContainerLogPath   = ContainerWorkdir + "/logs/tron.log"
+	containerConfigDir = ContainerConfDir
+	containerDataDir   = ContainerDataDir
+	containerLogDir    = ContainerWorkdir + "/logs"
 )
 
 // RenderCompose generates a docker-compose.yaml from the intent.

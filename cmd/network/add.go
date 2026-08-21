@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	applypkg "github.com/tronprotocol/tron-deployment/internal/apply"
+	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
@@ -191,10 +191,10 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("hash add intent: %w", err)
 	}
-	_, err = applypkg.Apply(cmd.Context(), applypkg.Options{
+	_, err = apply.Apply(cmd.Context(), apply.Options{
 		Intent: &clone, Target: tgt, Store: store, State: deployState,
-		IntentHash: applypkg.IntentHashFromBytes(data), Existing: store.GetNode(deployState, nodeName),
-		TemplateDir: findTemplatesDir(), DeploymentsDir: paths.Deployments(), IntentPath: addIntentPath,
+		IntentHash: apply.IntentHashFromBytes(data), Existing: store.GetNode(deployState, nodeName),
+		TemplateDir: apply.FindTemplatesDir(), DeploymentsDir: paths.Deployments(), IntentPath: addIntentPath,
 		RequirePrivate: guard.Requested(),
 		SkipMonitoring: parsed.Monitoring != nil && parsed.Monitoring.Enabled != nil && *parsed.Monitoring.Enabled,
 	})

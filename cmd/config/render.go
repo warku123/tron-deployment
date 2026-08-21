@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/render"
@@ -74,7 +75,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find templates directory (relative to binary or working directory)
-	templateDir := findTemplateDir()
+	templateDir := apply.FindTemplatesDir()
 
 	rendered := make([]renderedNode, 0, len(parsed.Nodes))
 	anyRedacted := false
@@ -266,20 +267,4 @@ func writeSecretFile(path string, data []byte) (err error) {
 		return err
 	}
 	return nil
-}
-
-// findTemplateDir prefers the TROND_TEMPLATES_DIR env var, then falls back to
-// ./templates. An empty return value tells render.RenderHOCON to use the
-// embedded copy — release binaries work without any co-located files.
-func findTemplateDir() string {
-	if d := os.Getenv("TROND_TEMPLATES_DIR"); d != "" {
-		return d
-	}
-	candidates := []string{"templates", "./templates"}
-	for _, c := range candidates {
-		if info, err := os.Stat(c); err == nil && info.IsDir() {
-			return c
-		}
-	}
-	return ""
 }

@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"os"
 	"path/filepath"
 )
@@ -15,14 +16,10 @@ type Store struct {
 }
 
 // NewStore creates a state store at the given path.
-// If path is empty, defaults to ~/.trond/state.json.
+// If path is empty, uses paths.State().
 func NewStore(path string) (*Store, error) {
 	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("get home dir: %w", err)
-		}
-		path = filepath.Join(home, ".trond", "state.json")
+		path = paths.State()
 	}
 
 	// Ensure directory exists

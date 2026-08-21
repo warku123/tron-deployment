@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tronprotocol/tron-deployment/internal/render"
 	"github.com/tronprotocol/tron-deployment/internal/state"
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
@@ -184,7 +185,7 @@ func LogsDescriptor(node *state.ManagedNode) map[string]any {
 		return map[string]any{
 			"runtime":   "docker",
 			"container": node.Name,
-			"path":      "/java-tron/logs/tron.log",
+			"path":      render.ContainerLogPath,
 		}
 	default:
 		// Unknown/unrecorded runtime (e.g. a legacy node from before the

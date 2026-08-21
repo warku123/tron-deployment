@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tronprotocol/tron-deployment/internal/render"
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
@@ -160,7 +161,7 @@ func (r *DockerRuntime) Logs(ctx context.Context, name string, opts LogOpts) (io
 	if opts.Follow {
 		tailArgs = append(tailArgs, "-f")
 	}
-	tailArgs = append(tailArgs, "/java-tron/logs/tron.log")
+	tailArgs = append(tailArgs, render.ContainerLogPath)
 	if opts.Follow {
 		if stream, ok := r.target.(target.StreamExec); ok {
 			if reader, err := stream.StreamExec(ctx, "docker", tailArgs...); err == nil {

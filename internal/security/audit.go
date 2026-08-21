@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"time"
 )
 
@@ -47,14 +49,10 @@ type AuditLog struct {
 	mu   sync.Mutex
 }
 
-// NewAuditLog creates an audit log writer. If path is empty, defaults to ~/.trond/audit.log.
+// NewAuditLog creates an audit log writer. If path is empty, uses paths.AuditLog().
 func NewAuditLog(path string) (*AuditLog, error) {
 	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("get home dir: %w", err)
-		}
-		path = filepath.Join(home, ".trond", "audit.log")
+		path = paths.AuditLog()
 	}
 
 	dir := filepath.Dir(path)
