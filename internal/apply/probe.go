@@ -30,10 +30,7 @@ func LiveStatus(ctx context.Context, tgt target.Target, node *state.ManagedNode)
 	if tgt == nil || node == nil {
 		return out
 	}
-	port := node.HTTPPort
-	if port == 0 {
-		port = 8090
-	}
+	port := PortOrDefault(node.HTTPPort, 8090)
 
 	// probe issues a request against the node's HTTP API. body=="" is a
 	// GET (TRON endpoints that take no params, e.g. getnowblock); a
@@ -42,7 +39,7 @@ func LiveStatus(ctx context.Context, tgt target.Target, node *state.ManagedNode)
 	// (SSH-tunnelled for remote targets); docker nodes curl inside the
 	// container via `docker exec`.
 	probe := func(path, body string) ([]byte, error) {
-		url := fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
+		url := ProbeURL(port, path)
 		if node.Runtime == "jar" {
 			if body == "" {
 				return target.Get(ctx, tgt, url, 2*time.Second)

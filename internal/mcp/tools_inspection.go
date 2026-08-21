@@ -205,10 +205,10 @@ func inspectAllNodes(ctx context.Context, _ *mcp.CallToolRequest, _ emptyArgs) (
 		// extraction.
 		eps := map[string]string{}
 		if n.HTTPPort != 0 {
-			eps["http"] = httpURL(target.EndpointHost(n.Target.Type, n.Target.Host), n.HTTPPort)
+			eps["http"] = apply.HTTPURL(target.EndpointHost(n.Target.Type, n.Target.Host), n.HTTPPort)
 		}
 		if n.GRPCPort != 0 {
-			eps["grpc"] = grpcAddr(target.EndpointHost(n.Target.Type, n.Target.Host), n.GRPCPort)
+			eps["grpc"] = apply.GRPCAddr(target.EndpointHost(n.Target.Type, n.Target.Host), n.GRPCPort)
 		}
 		if len(eps) > 0 {
 			row["endpoints"] = eps

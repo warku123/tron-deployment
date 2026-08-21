@@ -11,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/diagnosis"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/state"
@@ -168,14 +169,11 @@ func healthTool(ctx context.Context, _ *mcp.CallToolRequest, args nodeArg) (*mcp
 	if node == nil {
 		return errResult(notFound("health", args.Name))
 	}
-	port := node.HTTPPort
-	if port == 0 {
-		port = 8090
-	}
+	port := apply.PortOrDefault(node.HTTPPort, 8090)
 	// The probe URL stays on loopback: target.HTTPClient dials through the
 	// SSH tunnel, which lands on the remote host's loopback.
-	url := httpURL("127.0.0.1", port) + "/wallet/getnowblock"
-	endpoint := httpURL(target.EndpointHost(node.Target.Type, node.Target.Host), port) + "/wallet/getnowblock"
+	url := apply.ProbeURL(port, "/wallet/getnowblock")
+	endpoint := apply.HTTPURL(target.EndpointHost(node.Target.Type, node.Target.Host), port) + "/wallet/getnowblock"
 
 	// Probe through the node's target (SSH-tunnelled for remote nodes),
 	// not via http.DefaultClient against this host's loopback — that

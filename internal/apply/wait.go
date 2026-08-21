@@ -19,10 +19,7 @@ import (
 func WaitForReady(ctx context.Context, tgt target.Target, name, runtimeName string, httpPort int, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if httpPort == 0 {
-		httpPort = 8090
-	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/wallet/getnowblock", httpPort)
+	url := ProbeURL(httpPort, "/wallet/getnowblock")
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	var lastErr error

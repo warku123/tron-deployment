@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/state"
 	"github.com/tronprotocol/tron-deployment/internal/target"
@@ -147,8 +148,8 @@ func readNodeEndpointsResource(_ context.Context, req *mcp.ReadResourceRequest) 
 		"runtime": node.Runtime,
 		"target":  node.Target,
 		"endpoints": map[string]string{
-			"http": fmt.Sprintf("http://%s:%d", host, node.HTTPPort),
-			"grpc": fmt.Sprintf("%s:%d", host, node.GRPCPort),
+			"http": apply.HTTPURL(host, node.HTTPPort),
+			"grpc": apply.GRPCAddr(host, node.GRPCPort),
 		},
 		"version": node.Version,
 		"labels":  node.Labels,
