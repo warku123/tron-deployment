@@ -166,13 +166,17 @@ func autoHealTool(ctx context.Context, _ *mcp.CallToolRequest, args autoHealArgs
 		healed = append(healed, entry)
 	}
 
-	return jsonResult(map[string]any{
+	result := map[string]any{
 		"name":          args.Name,
 		"dry_run":       args.DryRun,
 		"healed":        healed,
 		"skipped":       skipped,
 		"still_failing": stillFailing,
-	})
+	}
+	if len(healed) == 0 && len(skipped) == 0 && len(stillFailing) == 0 {
+		result["result"] = "no_action"
+	}
+	return jsonResult(result)
 }
 
 func recordHealStateSaveFailure(err error, entry map[string]any, check diagnosis.CheckResult, stillFailing *[]diagnosis.CheckResult) {

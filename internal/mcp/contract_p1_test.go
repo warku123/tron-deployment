@@ -338,6 +338,29 @@ func TestAutoHealToolPassesRecordedNetworkToChecker(t *testing.T) {
 	}
 }
 
+func TestAutoHealToolReportsNoActionWhenAllChecksPass(t *testing.T) {
+	paths.SetBaseDir(t.TempDir())
+	t.Cleanup(func() { paths.SetBaseDir("") })
+	store, err := state.NewStore(paths.State())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(&state.DeploymentState{Nodes: []state.ManagedNode{{Name: "heal-pass", Network: "private", Runtime: "docker"}}}); err != nil {
+		t.Fatal(err)
+	}
+	old := healCheckers
+	healCheckers = func() []diagnosis.Checker { return []diagnosis.Checker{captureNetworkChecker{got: new(string)}} }
+	t.Cleanup(func() { healCheckers = old })
+	_, value, err := autoHealTool(context.Background(), nil, autoHealArgs{Name: "heal-pass"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := value.(map[string]any)
+	if !ok || got["result"] != "no_action" {
+		t.Fatalf("result=%v", value)
+	}
+}
+
 func TestPeersCheckerUsesNetworkInRealCheck(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

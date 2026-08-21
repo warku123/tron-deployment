@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/target"
@@ -32,6 +33,9 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	parsed, err := intent.Load(bootstrapIntentPath)
 	if err != nil {
 		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
+	}
+	if err := guard.Enforce(parsed.Network); err != nil {
+		return err
 	}
 
 	tgt, err := resolveTarget(parsed)

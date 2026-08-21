@@ -231,6 +231,13 @@ func (r *JarRuntime) Logs(ctx context.Context, name string, opts LogOpts) (io.Re
 	if opts.Follow {
 		args = append(args, "-f")
 	}
+	if opts.Follow {
+		if stream, ok := r.target.(target.StreamExec); ok {
+			if reader, err := stream.StreamExec(ctx, "journalctl", args...); err == nil {
+				return reader, nil
+			}
+		}
+	}
 
 	out, err := r.target.Exec(ctx, "journalctl", args...)
 	if err != nil {

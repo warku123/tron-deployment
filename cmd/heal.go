@@ -183,6 +183,9 @@ func runAutoHeal(cmd *cobra.Command, args []string) error {
 		"duration_ms":   time.Since(start).Milliseconds(),
 		"dry_run":       healDryRun,
 	}
+	if len(healed) == 0 && len(skipped) == 0 && len(stillFailing) == 0 {
+		result["result"] = "no_action"
+	}
 
 	outputFmt, _ := cmd.Flags().GetString("output")
 	if outputFmt == "json" {

@@ -161,6 +161,13 @@ func (r *DockerRuntime) Logs(ctx context.Context, name string, opts LogOpts) (io
 		tailArgs = append(tailArgs, "-f")
 	}
 	tailArgs = append(tailArgs, "/java-tron/logs/tron.log")
+	if opts.Follow {
+		if stream, ok := r.target.(target.StreamExec); ok {
+			if reader, err := stream.StreamExec(ctx, "docker", tailArgs...); err == nil {
+				return reader, nil
+			}
+		}
+	}
 
 	if out, err := r.target.Exec(ctx, "docker", tailArgs...); err == nil {
 		return io.NopCloser(bytes.NewReader(out)), nil

@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // LocalTarget executes commands and file operations on the local machine.
@@ -34,6 +35,37 @@ func (t *LocalTarget) Exec(ctx context.Context, cmd string, args ...string) ([]b
 		return out, fmt.Errorf("exec %s: %w: %s", cmd, err, string(out))
 	}
 	return out, nil
+}
+
+func (t *LocalTarget) StreamExec(ctx context.Context, cmd string, args ...string) (io.ReadCloser, error) {
+	c := exec.CommandContext(ctx, cmd, args...)
+	stdout, err := c.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stderr, err := c.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Start(); err != nil {
+		return nil, err
+	}
+	pr, pw := io.Pipe()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	copyStream := func(src io.Reader) { defer wg.Done(); _, _ = io.Copy(pw, src) }
+	go copyStream(stdout)
+	go copyStream(stderr)
+	go func() { wg.Wait(); _ = pw.Close() }()
+	return &streamReader{ReadCloser: pr, terminate: func() {
+		if c.Process != nil {
+			_ = c.Process.Kill()
+		}
+	}, wait: func() error {
+		waitErr := c.Wait()
+		wg.Wait()
+		return waitErr
+	}}, nil
 }
 
 func (t *LocalTarget) Upload(_ context.Context, localPath, remotePath string) error {

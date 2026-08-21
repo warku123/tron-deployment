@@ -323,7 +323,9 @@ func runStep(ctx context.Context, opts RunOptions, step Step, args []string) (St
 	cmd.Stderr = opts.Err
 	stdout, err := cmd.Output()
 	res.DurationMs = time.Since(start).Milliseconds()
-	res.ExitCode = cmd.ProcessState.ExitCode()
+	if cmd.ProcessState != nil {
+		res.ExitCode = cmd.ProcessState.ExitCode()
+	}
 	res.Output = captureOutput(stdout)
 
 	if err != nil {

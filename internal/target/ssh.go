@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -295,6 +296,124 @@ func (t *SSHTarget) Exec(ctx context.Context, cmd string, args ...string) ([]byt
 		_ = session.Close()
 		return combined.Bytes(), ctx.Err()
 	}
+}
+
+// StreamExec starts an allow-listed remote command without buffering output.
+func (t *SSHTarget) StreamExec(ctx context.Context, cmd string, args ...string) (io.ReadCloser, error) {
+	if t.client == nil {
+		return nil, fmt.Errorf("ssh not connected")
+	}
+	validate := security.ValidateCommand
+	if t.provisioning {
+		validate = security.ValidateProvisioningCommand
+	}
+	if err := validate(cmd); err != nil {
+		return nil, err
+	}
+	session, err := t.client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("new ssh session: %w", err)
+	}
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		session.Close()
+		return nil, err
+	}
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		session.Close()
+		return nil, err
+	}
+	if err := session.Start(quoteArgs(cmd, args)); err != nil {
+		session.Close()
+		return nil, err
+	}
+	pr, pw := io.Pipe()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	copyStream := func(src io.Reader) { defer wg.Done(); _, _ = io.Copy(pw, src) }
+	go copyStream(stdout)
+	go copyStream(stderr)
+	streamDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		// Close streamDone before the pipe: runLogs may return from io.Copy
+		// and call Close() the moment pw closes; streamDone must already be
+		// closed so Close() classifies this as a natural EOF (no terminate).
+		close(streamDone)
+		_ = pw.Close()
+	}()
+	var terminateOnce sync.Once
+	terminate := func() { terminateOnce.Do(func() { _ = session.Signal(ssh.SIGTERM); _ = session.Close() }) }
+	processDone := make(chan error, 1)
+	go func() { processDone <- session.Wait() }()
+	watchStop, watchDone := watchSSHStreamContext(ctx, terminate)
+	return &sshStreamReader{ReadCloser: pr, watchStop: watchStop, watchDone: watchDone, terminate: terminate, processDone: processDone, streamDone: streamDone, wait: func() error {
+		waitErr := <-processDone
+		wg.Wait()
+		_ = session.Close()
+		return waitErr
+	}}, nil
+}
+
+func watchSSHStreamContext(ctx context.Context, stopRemote func()) (chan struct{}, chan struct{}) {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-ctx.Done():
+			stopRemote()
+		case <-stop:
+		}
+	}()
+	return stop, done
+}
+
+type sshStreamReader struct {
+	io.ReadCloser
+	wait        func() error
+	terminate   func()
+	watchStop   chan struct{}
+	watchDone   chan struct{}
+	processDone chan error
+	streamDone  chan struct{}
+	closeOnce   sync.Once
+	closeErr    error
+}
+
+func (r *sshStreamReader) Close() error {
+	r.closeOnce.Do(func() {
+		close(r.watchStop)
+		<-r.watchDone
+		var waitErr error
+		if r.processDone != nil && r.streamDone != nil {
+			select {
+			case <-r.streamDone:
+				waitErr = <-r.processDone
+			default:
+				r.terminate()
+				waitErr = <-r.processDone
+			}
+		} else if r.processDone != nil {
+			select {
+			case waitErr = <-r.processDone:
+			default:
+				r.terminate()
+				waitErr = <-r.processDone
+			}
+		} else {
+			r.terminate()
+			waitErr = r.wait()
+		}
+		err := r.ReadCloser.Close()
+		if err != nil {
+			r.closeErr = err
+		} else {
+			r.closeErr = waitErr
+		}
+	})
+	return r.closeErr
 }
 
 func (t *SSHTarget) Upload(ctx context.Context, localPath, remotePath string) error {

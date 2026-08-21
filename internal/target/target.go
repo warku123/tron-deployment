@@ -218,6 +218,34 @@ type Target interface {
 	String() string
 }
 
+// StreamExec runs a command and returns its live stdout/stderr stream.
+// Targets that cannot provide a stream should continue using Exec.
+type StreamExec interface {
+	StreamExec(ctx context.Context, cmd string, args ...string) (io.ReadCloser, error)
+}
+
+type streamReader struct {
+	io.ReadCloser
+	wait      func() error
+	terminate func()
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (r *streamReader) Close() error {
+	r.closeOnce.Do(func() {
+		r.terminate()
+		err := r.ReadCloser.Close()
+		waitErr := r.wait()
+		if err != nil {
+			r.closeErr = err
+		} else {
+			r.closeErr = waitErr
+		}
+	})
+	return r.closeErr
+}
+
 // Permissions is an optional target capability for tightening an existing
 // file without rewriting its contents.
 type Permissions interface {
