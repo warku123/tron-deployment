@@ -2,7 +2,6 @@ package render
 
 import (
 	"fmt"
-	"maps"
 	"sort"
 	"strings"
 
@@ -31,7 +30,9 @@ func sortedKeys(m map[string]string) []string {
 // witness_key.keystore_password_env is set.
 func composeEnvLines(node *intent.NodeSpec) []string {
 	env := make(map[string]string, len(node.ExtraEnv)+1)
-	maps.Copy(env, node.ExtraEnv)
+	for key, value := range node.ExtraEnv {
+		env[key] = strings.ReplaceAll(value, "$", "$$")
+	}
 	if node.Type == "witness" && node.WitnessKey != nil && node.WitnessKey.KeystorePasswordEnv != "" {
 		passwordEnv := node.WitnessKey.KeystorePasswordEnv
 		env[passwordEnv] = "${" + passwordEnv + "}"
@@ -314,9 +315,10 @@ func volumeDeclName(src string) string {
 // renderComposePorts produces the host:container port mappings.
 //
 // The P2P port also needs UDP exposed for kad-style peer discovery. HTTP /
-// gRPC are TCP-only. Optional features (jsonrpc, metrics, solidity APIs)
-// are appended only when the user explicitly enables them or sets a custom
-// port.
+// gRPC are TCP-only. JSON-RPC and metrics are published when enabled.
+// Solidity HTTP/gRPC ports remain internal to the node and are intentionally
+// not published on the host; their persisted state ports support node probes,
+// not external exposure.
 func renderComposePorts(node *intent.NodeSpec) []string {
 	ports := []string{
 		fmt.Sprintf("%d:%d", node.Ports.HTTP, node.Ports.HTTP),
@@ -332,6 +334,5 @@ func renderComposePorts(node *intent.NodeSpec) []string {
 	if node.Features.Metrics != nil && *node.Features.Metrics {
 		ports = append(ports, fmt.Sprintf("%d:%d", node.Ports.Metrics, node.Ports.Metrics))
 	}
-
 	return ports
 }

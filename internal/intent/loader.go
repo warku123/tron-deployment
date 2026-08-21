@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"bytes"
 	"fmt"
 	"net/url"
 	"os"
@@ -258,7 +259,9 @@ func Load(path string) (*Intent, error) {
 // Parse parses intent YAML bytes, validates, and applies defaults.
 func Parse(data []byte) (*Intent, error) {
 	var intent Intent
-	if err := yaml.Unmarshal(data, &intent); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&intent); err != nil {
 		return nil, fmt.Errorf("parse intent YAML: %w", err)
 	}
 
@@ -275,7 +278,9 @@ func Parse(data []byte) (*Intent, error) {
 // defaults at the field level.
 func ParseRaw(data []byte) (*Intent, error) {
 	var intent Intent
-	if err := yaml.Unmarshal(data, &intent); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&intent); err != nil {
 		return nil, fmt.Errorf("parse intent YAML: %w", err)
 	}
 	return &intent, nil

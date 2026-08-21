@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
@@ -38,7 +39,9 @@ func LoadWithOverlay(basePath, overlayPath string) (*Intent, error) {
 func mergeOverlay(base *Intent, overlayData []byte) error {
 	// Parse overlay as a partial intent
 	var overlay Intent
-	if err := yaml.Unmarshal(overlayData, &overlay); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(overlayData))
+	dec.KnownFields(true)
+	if err := dec.Decode(&overlay); err != nil {
 		return fmt.Errorf("parse overlay YAML: %w", err)
 	}
 
@@ -49,8 +52,28 @@ func mergeOverlay(base *Intent, overlayData []byte) error {
 	if overlay.Network != "" {
 		base.Network = overlay.Network
 	}
-	if overlay.Target.Type != "" {
-		base.Target = overlay.Target
+	if overlay.Target.Type != "" || overlay.Target.Host != "" || overlay.Target.Port != 0 || overlay.Target.User != "" || overlay.Target.IdentityFile != "" || overlay.Target.Runtime != "" || overlay.Target.AutoPorts {
+		if overlay.Target.Type != "" {
+			base.Target.Type = overlay.Target.Type
+		}
+		if overlay.Target.Host != "" {
+			base.Target.Host = overlay.Target.Host
+		}
+		if overlay.Target.Port != 0 {
+			base.Target.Port = overlay.Target.Port
+		}
+		if overlay.Target.User != "" {
+			base.Target.User = overlay.Target.User
+		}
+		if overlay.Target.IdentityFile != "" {
+			base.Target.IdentityFile = overlay.Target.IdentityFile
+		}
+		if overlay.Target.Runtime != "" {
+			base.Target.Runtime = overlay.Target.Runtime
+		}
+		if overlay.Target.AutoPorts {
+			base.Target.AutoPorts = true
+		}
 	}
 	if len(overlay.Nodes) > 0 {
 		base.Nodes = overlay.Nodes
