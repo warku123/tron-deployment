@@ -315,6 +315,7 @@ func managedNodeDestinationMatches(dest string, node *state.ManagedNode) bool {
 // Compose is generated in a stable, one-volume-per-line form; parse only the
 // volume targeting java-tron's data directory.
 func legacyDockerStorageRoot(name string) (string, bool) {
+	// Transitional fallback for pre-storage_root state; remove after all nodes are re-applied (next major).
 	compose := filepath.Join(paths.Deployments(), name, "docker-compose.yaml")
 	f, err := os.Open(compose)
 	if err != nil {

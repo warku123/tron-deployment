@@ -28,6 +28,8 @@ var (
 )
 
 var createApply = apply.Apply
+
+// createTarget is a test injection seam; production default resolves the target.
 var createTarget = func(parsed *intent.Intent) (target.Target, error) {
 	switch parsed.Target.Type {
 	case "ssh":

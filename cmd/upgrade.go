@@ -24,6 +24,7 @@ On failure, automatically rolls back to the previous version.`,
 	RunE: runUpgrade,
 }
 
+// saveUpgradeState is a test injection seam; production default persists via nodeContext.SaveState.
 var saveUpgradeState = func(nc *nodeContext) error { return nc.SaveState() }
 
 func init() {
@@ -95,7 +96,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	nc.Node.PreviousVersion = previousVersion
 	nc.Node.Version = upgradeVersion
 	nc.Node.Status = "running"
-	if err := persistUpgradeState(name, nc, start); err != nil {
+	if err := persistNodeState("upgrade", name, nc, start, saveUpgradeState); err != nil {
 		return err
 	}
 	writeAudit(auditEvent{Command: "upgrade", Node: name, Target: nc.Target.String(), Result: "success", Start: start})
@@ -106,14 +107,6 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		"version":          upgradeVersion,
 		"previous_version": previousVersion,
 	})
-	return nil
-}
-
-func persistUpgradeState(name string, nc *nodeContext, start time.Time) error {
-	if err := saveUpgradeState(nc); err != nil {
-		writeAudit(auditEvent{Command: "upgrade", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "STATE_ERROR", Start: start})
-		return exitWithError("STATE_ERROR", output.ExitGeneralError, fmt.Sprintf("Failed to persist %s state: %v", name, err))
-	}
 	return nil
 }
 

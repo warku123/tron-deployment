@@ -139,6 +139,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, "marshal effective intent: "+err.Error())
 	}
 	intentHash := apply.EffectiveIntentHash(canonicalIntent)
+	// Transitional compatibility for pre-v2 state; remove after migration in the next major.
 	legacyMatch := existing != nil && apply.LegacyIntentHashMatches(rawIntent, canonicalIntent, existing)
 	if legacyMatch {
 		// Preserve the recorded legacy hash for a true no-op. The next

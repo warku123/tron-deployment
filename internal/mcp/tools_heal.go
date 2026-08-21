@@ -35,6 +35,7 @@ var saveHealState = func(store *state.Store, st *state.DeploymentState) error {
 var runHealAction = mcpRunHealAction
 var healCheckers = diagnosis.AllCheckers
 
+// healRuntimeForNode is a test injection seam; production default selects jar or Docker runtime.
 var healRuntimeForNode = func(tgt target.Target, node *state.ManagedNode) runtime.Runtime {
 	if node.Runtime == "jar" {
 		return runtime.NewJarRuntime(tgt)

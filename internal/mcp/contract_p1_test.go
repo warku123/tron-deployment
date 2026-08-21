@@ -178,7 +178,10 @@ func TestApplyToolUsesConfiguredTemplateForPlanAndDeploy(t *testing.T) {
 	// The template loader requires the matching private-network file. The
 	// marker makes the rendered/deployed config observably external-template based.
 	marker := "# external-template-marker"
-	template := marker + "\nnode {\n  metrics {\n    prometheus = false\n  }\n}\n"
+	// rpc block required: ports.solidity_grpc render now errors when the template
+	// has no rpc block (AUD-024). Keep the default value so the rendered output
+	// stays byte-identical to this template.
+	template := marker + "\nnode {\n  metrics {\n    prometheus = false\n  }\n}\nrpc {\n  port = 50051\n  solidityPort = 50061\n}\n"
 	if err := os.WriteFile(templateDir+"/private_net_config.conf", []byte(template), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -196,14 +199,26 @@ func TestApplyToolUsesConfiguredTemplateForPlanAndDeploy(t *testing.T) {
 	}
 	res, value, err := applyTool(context.Background(), nil, applyArgs{Path: p, AutoApprove: true})
 	if err != nil || res == nil || res.IsError {
-		t.Fatalf("apply result=%v err=%v", res, err)
+		t.Fatalf("apply result=%v err=%v body=%s", res, err, extractText(t, res))
 	}
 	got, ok := value.(*apply.Result)
 	if !ok {
 		t.Fatalf("result type=%T", value)
 	}
-	if got.ConfigHash != apply.IntentHashFromBytes([]byte(template)) {
-		t.Fatalf("config hash=%q, external template base hash=%q", got.ConfigHash, apply.IntentHashFromBytes([]byte(template)))
+	parsed, lerr := intent.Load(p)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	rendered, rerr := render.RenderHOCONWithSecrets(templateDir, parsed, &parsed.Nodes[0])
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if !strings.Contains(rendered.Deployable(), marker) {
+		t.Fatal("rendered config missing external template marker")
+	}
+	want := apply.IntentHashFromBytes([]byte(rendered.Deployable()))
+	if got.ConfigHash != want {
+		t.Fatalf("config hash=%q, external template rendered hash=%q", got.ConfigHash, want)
 	}
 	if data, err := os.ReadFile(dockerCalls); err != nil || len(data) == 0 {
 		t.Fatalf("deploy did not use docker runtime: err=%v calls=%q", err, data)
