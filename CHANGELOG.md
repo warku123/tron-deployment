@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **P0 audit remediation.** Batch B adds focused cmd-side test splits for
+  `cmd/build`, `cmd/state`, `cmd/network create`, and `cmd/apply` (B1–B8),
+  while domain 1–5 fixes harden lifecycle, state persistence, target
+  transport, rendering, snapshots, runtime upgrades, security, replay, and
+  transaction broadcasting behavior.
+- Multi-node network creation, addition, destruction, and rolling upgrades
+  now persist node state consistently, verify every node, and roll back
+  already-upgraded nodes when verification fails. Automatic port allocation
+  is persisted for repeatable reconciliation.
+- Snapshot downloads stage data before publishing atomically, refuse unsafe
+  overwrites, verify the process identity before stopping jobs, and merge
+  build environment maps correctly. Jar upgrades and rollbacks now swap the
+  running artifact reliably.
+- Rendering now validates strict YAML fields, merges overlays correctly,
+  escapes Compose environment values, wires the `solidity_grpc` port, avoids
+  in-container HTTP-port conflicts, and caps JVM heap below 8 GB of container
+  memory. SSH probing and downloads are resilient and report the actual host.
+- Sensitive witness data remains redacted, JAR configuration permissions are
+  restricted, state saves are atomic with surfaced persistence errors, and
+  replay cursors advance only after complete block replay.
+
+### Changed
+
+- Shared state loading, target resolution, live-config reading, template and
+  path discovery, diff computation, environment-variable expansion
+  (`internal/apply.ResolveEnvVars`), endpoint/port handling, and node-state
+  persistence are centralized across CLI and MCP paths.
+- `trond plan` now reports `current_state: "not_deployed"` instead of
+  `"not deployed"`, matching the documented machine-readable contract.
+- `intent_hash` in `apply` and `status` output is now versioned as
+  `v2:<sha256>`; the previous bare-hex digest format is replaced by the v2
+  digest scheme.
+- With `auto_ports: true`, allocated ports are persisted. Re-running
+  `trond plan` after `apply` now correctly reports `changes: null` and zero
+  downtime instead of spurious configuration diffs requiring a restart.
+- MCP lifecycle and diagnostic paths now use the same CLI contracts and
+  shared implementations; contract coverage and implementation specs were
+  expanded to document the corrected behavior.
+
 ## [0.1.0] — 2026-XX-XX
 
 First tagged release. The project transitions from a curated set of HOCON
