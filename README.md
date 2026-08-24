@@ -41,12 +41,6 @@ SHA256, and drops the binary into `/usr/local/bin` (or `~/.local/bin` if it
 can't write the system path). Set `TROND_VERSION=v0.x.y` to pin a specific
 release, or `TROND_DEST=/path` to install elsewhere.
 
-### Homebrew (macOS / Linuxbrew)
-
-```bash
-brew install tronprotocol/tap/trond
-```
-
 ### Linux packages
 
 `.deb`, `.rpm`, and `.apk` packages are attached to every release, e.g.
@@ -58,14 +52,6 @@ sudo dpkg -i trond_*.deb
 
 # RHEL / Fedora
 sudo rpm -i https://github.com/tronprotocol/tron-deployment/releases/latest/download/trond_VERSION_linux_amd64.rpm
-```
-
-### Docker
-
-```bash
-docker run --rm -v ~/.trond:/home/trond/.trond \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  tronprotocol/trond:latest --help
 ```
 
 ### From release tarball
@@ -131,7 +117,9 @@ autoload -U compinit && compinit
 
 ## Verifying a release
 
-Every published release is signed with [Sigstore](https://www.sigstore.dev/) `cosign` keyless OIDC — no long-lived signing key, identity is the GitHub Actions workflow that built the release. The signature covers `checksums.txt`, which transitively covers every artifact (tarballs, .deb / .rpm / .apk packages, docker images, the homebrew formula).
+Every published release is signed with [Sigstore](https://www.sigstore.dev/) `cosign` keyless OIDC — no long-lived signing key, identity is the GitHub Actions workflow that built the release. The signature covers `checksums.txt`, and `checksums.txt` lists every artifact attached to the release: the tarballs and the .deb / .rpm / .apk packages. Verifying the signature and then checking your download against that file therefore covers everything this project publishes.
+
+GitHub Releases is the only channel — there is no Homebrew tap and no container image. Publishing to either would mean keeping a long-lived credential that could release under this project's name, which is the thing keyless signing exists to avoid, and neither a tap formula nor a registry image can be listed in `checksums.txt` in the first place. If you want a package-manager install, use the `.deb` / `.rpm` / `.apk` above or build [from source](#from-source).
 
 One-time setup:
 
@@ -403,6 +391,35 @@ These commands exist so external test tools can drive trond programmatically.
 | `trond events [--follow] [--since <dur>]` | Stream the audit log as JSONL |
 | `trond knowledge [topic]` | Query embedded deployment guidance |
 
+### Agent interfaces
+
+The commands below exist so an AI agent — or any program driving trond
+without a shell — can discover the CLI, run canonical workflows, and
+reconcile desired state against reality. `AGENTS.md` is the reference for
+calling trond programmatically.
+
+| Command | Description |
+|---|---|
+| `trond schema` | Emit the entire CLI surface as structured data: every subcommand with flags, types, defaults, examples, and the JSON Schema of its `--output json` result |
+| `trond mcp` | Start a Model Context Protocol server over stdin/stdout, so MCP-aware clients call trond as tools rather than shelling out |
+| `trond recipe list` / `show` / `validate` / `run` | Canonical multi-step workflows as declarative YAML — run "deploy a fresh mainnet fullnode from a snapshot" as one command instead of chaining five |
+| `trond verify-config <node>` | Diff the `.conf` a running node actually uses against what trond would render now from `--intent`; read `in_sync` to detect drift |
+| `trond doctor` | Report trond's own health: version, state directory, docker availability, file permissions, and optionally whether a newer release exists |
+
+### Shadow-fork
+
+Take a real chain-DB snapshot, replace the witness set, fund accounts and
+change protocol parameters, then start a private network from that modified
+state — for rehearsing hard-fork upgrades, witness-set transitions, and
+contract behaviour against state that actually exists on chain.
+
+| Command | Description |
+|---|---|
+| `trond shadow-fork mutate` | Apply a `fork.conf` to a halted java-tron data directory |
+
+`scripts/poc-shadow-fork.sh` drives the whole pipeline end to end; see
+`trond knowledge shadow-fork-poc`.
+
 ### Global flags
 
 | Flag / env | Effect |
@@ -412,6 +429,8 @@ These commands exist so external test tools can drive trond programmatically.
 | `--log-format text\|json` | Log format on stderr |
 | `-q, --quiet` / `-v, --verbose` | Output verbosity |
 | `--no-color` | Disable ANSI colors |
+| `--require-private` / `TROND_REQUIRE_PRIVATE` | Refuse to mutate any non-private node — a one-way floor, see [Private-network safety](#private-network-safety-for-unattended-agents) |
+| `--version` | Print version, commit and build time, then exit |
 | `TROND_TEMPLATES_DIR` | Override the embedded HOCON templates |
 | `TROND_SSH_ACCEPT_NEW_HOSTS=1` | TOFU mode for SSH host keys (refuses on mismatch — never trusts a key change) |
 
@@ -490,6 +509,7 @@ name: <dns-label>             # required, ^[a-z0-9][a-z0-9-]{0,62}$
 network: mainnet|nile|private # required
 target: { ... }               # required, see below
 nodes: [ { ... }, ... ]       # required, at least one node
+monitoring: { ... }           # optional, Prometheus + Grafana — see Monitoring above
 ```
 
 ### Target
@@ -516,6 +536,13 @@ nodes:
     install_path: /opt/tron                  # jar runtime install root
     process_manager: systemd|nohup           # jar runtime, default systemd
     system_user: tron                        # jar runtime user
+
+    # Jar runtime: where to fetch FullNode.jar. http/file/ftp are refused,
+    # and sha256 is mandatory whenever url is set — an unverified jar is
+    # the whole node.
+    jar:
+      url: https://example.com/FullNode.jar  # https only
+      sha256: <64-char lowercase hex>        # required alongside url
 
     # Witness-only
     witness_key:                             # preferred: structured block

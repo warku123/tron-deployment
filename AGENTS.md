@@ -81,6 +81,21 @@ Unset (default) → no-op tracer, zero overhead, no network IO.
 | 4 | preflight failure (missing dependency on target) | DO NOT retry — present `missing_components` array to user; offer `trond bootstrap` |
 | 10 | `HUMAN_REQUIRED` — destructive op needs explicit confirmation | DO NOT silently retry with `--auto-approve` / `--confirm` unless the user has authorised that for this session |
 
+There is no exit code for partial success — branch on `error_code`, not on
+the exit status alone. One command emits a partial result today:
+`network destroy` exits **1** with `error_code: "PARTIAL_SUCCESS"`, a
+`removed` array and a `failed` array naming the nodes whose teardown failed.
+
+**Do not retry it.** The message says `state cleaned up regardless`: trond has
+already dropped every node from its state, so a second `network destroy`
+returns `NETWORK_NOT_FOUND`. The `failed` entries are containers or units
+still running on the target with nothing tracking them — surface that list to
+the user for manual cleanup rather than retrying.
+
+The other multi-node commands do not partially report: `network create` stops
+at the first failed node with `DEPLOY_ERROR`, and `network upgrade` with
+`UPGRADE_FAILED`, both exit 1.
+
 Every error JSON has the same shape:
 
 ```json
@@ -396,6 +411,9 @@ trond preflight --intent my-net.yaml -o json
 
 # 4. Create the whole network in one shot. trond auto-wires
 #    node.active between siblings so peering works under auto_ports.
+# SR_KEY below is the PUBLIC private-net key baked into
+# private_net_config.conf's genesis. It is safe here and only here —
+# never reuse it on a network that carries value.
 SR_KEY=a31d54825aea2fc5127e3bd435fc2346021313005e5f304ab33372432784acae \
   trond network create --intent my-net.yaml --wait -o json
 # Output: {"network":"pn", "nodes":[{"name":"pn-node0", "endpoints":{...}}, ...]}

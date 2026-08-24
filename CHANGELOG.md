@@ -7,11 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The agent-ergonomics arc lands across four sequenced PRs:
+## [0.1.0] — 2026-XX-XX
+
+First tagged release. The project transitions from a curated set of HOCON
+configuration templates into a CLI for declarative TRON node deployment.
+
+Nothing was published before this tag — no `v0.1.0-alpha` release ever existed,
+so the work that was previously filed under that heading is folded in here.
+
+`0.x` is deliberate. The public surface is not just the CLI flags: it is
+`schemas/intent.schema.json` (~50 fields), the ~30 machine-readable schemas
+under `schemas/output/`, and the exit-code contract that `AGENTS.md` tells
+agents to branch on. Those are worth changing in response to real use before
+they are frozen behind a compatibility promise, which is what `1.0.0` would
+mean under the semantic-versioning rule in the project constitution.
+
+The agent-ergonomics arc landed across four sequenced PRs:
 **#151** (CLI core + AGENTS.md) → **#152** (`trond schema`) →
 **#153** (`trond mcp`) → **#154** (`trond recipe`).
 
 ### Added
+
+The release ships **40 top-level commands** plus their subcommands, across
+lifecycle (apply / plan / stop / start / restart / upgrade / rollback /
+remove), configuration (config validate / render / diff / docs,
+verify-config), observability (status / list / logs / health / diagnose /
+verify / inspect / events / doctor), the test-harness SDK (exec / files /
+wait), chaos primitives (disconnect / connect / partition / heal /
+auto-heal), private networks (network create / add / status / destroy /
+upgrade), snapshots (download / clone / list / sources / jobs / logs / stop /
+prune), builds from source (build / list / inspect / prune), shadow-fork
+(mutate), agent interfaces (schema / mcp / recipe list / show / validate /
+run), environment (preflight / bootstrap), the knowledge base, and meta
+(version / completion / help). `trond schema` emits the whole surface as
+structured data; **Foundation** and **Since** below split it by when it
+landed.
+
+**Foundation**
+
+- The CLI itself: lifecycle, configuration, observability, the test-harness
+  SDK, chaos primitives, private networks, environment setup and the
+  knowledge base — the command groups the project launched with
+- Declarative intent.yaml schema covering ~50 fields:
+  target (local/ssh, runtime, auto_ports), node (type, version, image, ports,
+  resources, jvm, storage, restart, extra_env, extra_args, labels, networks,
+  depends_on, healthcheck, ulimits, extra_hosts, entrypoint, logging,
+  shm_size, jar source URL+SHA256), network_overrides
+  (seeds, active_peers, p2p_version, discovery, max_connections, …),
+  witness_key (private_key_env, keystore_path, account_address),
+  config_overrides (arbitrary HOCON dotted-key escape hatch)
+- HOCON two-pass render: in-place key rewrites + appended override block
+- Compose render aligned with the official `tronprotocol/java-tron` image:
+  `/java-tron/conf`, `/java-tron/output-directory`, `/java-tron/logs`
+- SSH host-key verification with explicit MITM detection (TOFU opt-in via
+  `TROND_SSH_ACCEPT_NEW_HOSTS=1`)
+- SSH command whitelist enforced at `Exec` entry
+- Private key never written to env or stdout — `PrivateKey` type redacted in
+  every formatter; witness key inlined into HOCON (which is 0600 on disk)
+- `--state-dir` / `TROND_STATE_DIR` for parallel test enclaves
+- `target.auto_ports: true` allocates free TCP+UDP ports automatically
+- `network create` auto-wires `node.active` peering between siblings
+- Audit log (JSONL) for every mutating command, streamable via `events --follow`
+
+**Since**
+
 - **`jvm.extra_opts`** — an escape hatch for JVM flags outside the closed
   heap/GC field set, appended last so they win on any last-flag-wins
   option. Needed because trond runs the JAR directly and so never reads
@@ -185,12 +244,11 @@ The agent-ergonomics arc lands across four sequenced PRs:
   `.github/dependabot.yml`
 - `cmd/gendoc` — emits man(1) pages and per-command markdown
 - `scripts/install.sh` — single-shot installer with SHA256 verification
-- `Dockerfile.release` — slim alpine image with `tronprotocol/trond`
 
 ### Changed
-- `goreleaser` now produces a homebrew tap, .deb / .rpm / .apk, and
-  multi-arch docker image alongside tar.gz archives; release notes
-  group commits by feat/fix
+
+- `goreleaser` now produces .deb / .rpm / .apk packages alongside the
+  tar.gz archives; release notes group commits by feat/fix
 - CI matrix expanded: `lint`, `test+coverage`, `govulncheck`, and
   cross-compile jobs run on every PR; e2e is its own workflow with
   the heavier schedule
@@ -208,6 +266,7 @@ The agent-ergonomics arc lands across four sequenced PRs:
   (was a documented TODO before); refuses `/` and empty paths
 
 ### Fixed
+
 - **`config_overrides` rendered Go syntax, not HOCON.** `hoconValue` fell
   back to `fmt.%v` for slices and maps, emitting `[map[address:T… voteCount:5000]]`
   — which no HOCON parser accepts — so every list-valued override was
@@ -263,6 +322,30 @@ The agent-ergonomics arc lands across four sequenced PRs:
   the SSH key after apply)
 
 ### Security
+
+- **GitHub Releases is the only publication channel.** The Homebrew tap and
+  the `tronprotocol/trond` Docker image were configured and are removed
+  before the first tag. Both needed a long-lived credential in this
+  repository's Actions secrets — a cross-repo PAT for the tap (the default
+  `GITHUB_TOKEN` cannot write to another repository) and a `DOCKERHUB_TOKEN`
+  — and either would let its holder publish under this project's name until
+  someone noticed and rotated it. That is the standing-secret risk cosign
+  keyless signing exists to remove. Neither channel's artifact could be
+  listed in `checksums.txt` either, so the README's claim that the signature
+  covered "docker images, the homebrew formula" was false; a snapshot build
+  confirms `checksums.txt` holds only the archives and the deb/rpm/apk
+  packages. README, the goreleaser manifest, and the project constitution
+  now agree on this
+- Third-party actions in `release.yml` are pinned to a commit SHA rather
+  than a moving tag, and `goreleaser-action`'s `version: latest` is pinned
+  to a range. That job holds `contents: write` and `id-token: write`, so
+  everything it runs is inside the trusted computing base of every
+  signature the project issues; a tag repointed upstream would have been an
+  unreviewed change to the signer
+- The goreleaser `before:` hook ran `go mod tidy`, which WRITES to
+  `go.mod`/`go.sum` — a release could be built from a lockfile other than
+  the reviewed, committed one (a local snapshot run did modify `go.sum`).
+  Replaced with `go mod download` + `go mod verify`
 - Reject control characters (`\n`, `\r`, …) in every free-form intent
   field; struct-tag `safe_string` + manual map/slice walk close compose
   YAML and systemd unit injection vectors
@@ -315,43 +398,8 @@ The agent-ergonomics arc lands across four sequenced PRs:
   `monitoring.grafana.admin_password_env` (the NAME of an env var
   feeding `GF_SECURITY_ADMIN_PASSWORD`)
 
-## [0.1.0-alpha] — 2026-XX-XX
-
-## [0.1.0-alpha] — 2026-XX-XX
-
-Initial public alpha. The project transitions from a curated set of HOCON
-configuration templates into a CLI for declarative TRON node deployment.
-
-### Added
-- 32 CLI commands across lifecycle (apply / stop / start / restart / upgrade /
-  rollback / remove), configuration (validate / render / diff / docs),
-  observability (status / list / logs / health / diagnose / verify / inspect /
-  events), test-harness SDK (exec / files / wait), chaos primitives
-  (disconnect / connect / partition / heal), private networks (create / add /
-  status / destroy), environment (preflight / bootstrap), knowledge base, and
-  meta (version / completion / help)
-- Declarative intent.yaml schema covering ~50 fields:
-  target (local/ssh, runtime, auto_ports), node (type, version, image, ports,
-  resources, jvm, storage, restart, extra_env, extra_args, labels, networks,
-  depends_on, healthcheck, ulimits, extra_hosts, entrypoint, logging,
-  shm_size, jar source URL+SHA256), network_overrides
-  (seeds, active_peers, p2p_version, discovery, max_connections, …),
-  witness_key (private_key_env, keystore_path, account_address),
-  config_overrides (arbitrary HOCON dotted-key escape hatch)
-- HOCON two-pass render: in-place key rewrites + appended override block
-- Compose render aligned with the official `tronprotocol/java-tron` image:
-  `/java-tron/conf`, `/java-tron/output-directory`, `/java-tron/logs`
-- SSH host-key verification with explicit MITM detection (TOFU opt-in via
-  `TROND_SSH_ACCEPT_NEW_HOSTS=1`)
-- SSH command whitelist enforced at `Exec` entry
-- Private key never written to env or stdout — `PrivateKey` type redacted in
-  every formatter; witness key inlined into HOCON (which is 0600 on disk)
-- `--state-dir` / `TROND_STATE_DIR` for parallel test enclaves
-- `target.auto_ports: true` allocates free TCP+UDP ports automatically
-- `network create` auto-wires `node.active` peering between siblings
-- Audit log (JSONL) for every mutating command, streamable via `events --follow`
-
 ### Repository changes
+
 - HOCON templates remain at the repository root (`main_net_config.conf`,
   `test_net_config.conf`, `private_net_config.conf`) and continue to track
   upstream. `make sync-templates` refreshes them
@@ -359,5 +407,5 @@ configuration templates into a CLI for declarative TRON node deployment.
   release time and bundled into the binary so `trond config render` works
   from any working directory
 
-[Unreleased]: https://github.com/tronprotocol/tron-deployment/compare/v0.1.0-alpha...HEAD
-[0.1.0-alpha]: https://github.com/tronprotocol/tron-deployment/releases/tag/v0.1.0-alpha
+[Unreleased]: https://github.com/tronprotocol/tron-deployment/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/tronprotocol/tron-deployment/releases/tag/v0.1.0
