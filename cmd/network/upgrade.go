@@ -167,7 +167,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		if upgradeJarSHA256 != "" {
 			upgradeArgs = append(upgradeArgs, "--jar-sha256", upgradeJarSHA256)
 		}
-		err := runChild(cmd.Context(), exe, upgradeArgs...)
+		err := runNetworkChild(cmd.Context(), exe, st, node, upgradeArgs...)
 		steps = append(steps, upgradeStep{
 			Node:       node,
 			Phase:      "upgrade",
@@ -176,7 +176,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 			Error:      errString(err),
 		})
 		if err != nil {
-			return finishWithFailure(cmd.Context(), outputFmt, networkName, exe,
+			return finishWithFailure(cmd.Context(), outputFmt, networkName, exe, st,
 				steps, upgraded, start, node, err)
 		}
 		// The artifact has been changed successfully. Keep this node in the
@@ -194,7 +194,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 			Error:      errString(err),
 		})
 		if err != nil {
-			return finishWithFailure(cmd.Context(), outputFmt, networkName, exe,
+			return finishWithFailure(cmd.Context(), outputFmt, networkName, exe, st,
 				steps, upgraded, start, node, err)
 		}
 
@@ -208,6 +208,12 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		"steps":          steps,
 		"duration_ms":    time.Since(start).Milliseconds(),
 		"status":         "success",
+	}
+	for _, node := range upgraded {
+		if err := cleanupNetworkBackup(cmd.Context(), exe, st, node); err != nil {
+			return output.NewError("UPGRADE_ERROR", output.ExitGeneralError,
+				fmt.Sprintf("network upgrade succeeded but cleanup failed for %s: %v", node, err))
+		}
 	}
 	if outputFmt == "json" {
 		return output.WriteJSON(os.Stdout, result)
@@ -251,10 +257,23 @@ func isWitnessNode(n state.ManagedNode) bool {
 }
 
 var runChild = runChildCommand
+var runChildWithEnv = runChildCommandWithEnv
+
+const (
+	networkUpgradeRestoreEnv  = "TROND_NETWORK_UPGRADE=1"
+	networkUpgradePreserveEnv = "TROND_PRESERVE_BACKUP=1"
+)
 
 func runChildCommand(ctx context.Context, exe string, argv ...string) error {
+	return runChildCommandWithEnv(ctx, exe, nil, argv...)
+}
+
+func runChildCommandWithEnv(ctx context.Context, exe string, extraEnv []string, argv ...string) error {
 	argv = append(argv, "--output", "json")
 	cmd := exec.CommandContext(ctx, exe, argv...)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	var stdout, stderr limitedBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -366,12 +385,13 @@ func errString(err error) string {
 // step appended; otherwise the operator is told which nodes need
 // manual rollback.
 func finishWithFailure(ctx context.Context, outputFmt, networkName, exe string,
+	st *state.DeploymentState,
 	steps []upgradeStep, upgraded []string, start time.Time, failedNode string, failErr error) error {
 	rolledBack := make([]string, 0, len(upgraded))
 	if upgradeAutoRollback {
 		for _, node := range upgraded {
 			stepStart := time.Now()
-			err := runChild(ctx, exe, "rollback", node)
+			err := runNetworkChild(ctx, exe, st, node, "rollback", node)
 			steps = append(steps, upgradeStep{
 				Node:       node,
 				Phase:      "rollback",
@@ -417,4 +437,31 @@ func finishWithFailure(ctx context.Context, outputFmt, networkName, exe string,
 		)
 	}
 	return se
+}
+
+func runNetworkChild(ctx context.Context, exe string, st *state.DeploymentState, node string, argv ...string) error {
+	if st != nil {
+		for _, n := range st.Nodes {
+			if n.Name != node || n.Runtime != "jar" || len(argv) == 0 {
+				continue
+			}
+			switch argv[0] {
+			case "rollback":
+				return runChildWithEnv(ctx, exe, []string{networkUpgradeRestoreEnv}, argv...)
+			case "upgrade":
+				return runChildWithEnv(ctx, exe, []string{networkUpgradePreserveEnv}, argv...)
+			}
+		}
+	}
+	return runChild(ctx, exe, argv...)
+}
+
+func cleanupNetworkBackup(ctx context.Context, exe string, st *state.DeploymentState, node string) error {
+	for _, n := range st.Nodes {
+		if n.Name == node && n.Runtime == "jar" {
+			path := filepath.Join(n.InstallPath, "FullNode.jar.upgrade.backup")
+			return runChild(ctx, exe, "exec", node, "--", "sh", "-c", "rm -f -- "+path+"; printf '{}' ")
+		}
+	}
+	return nil
 }

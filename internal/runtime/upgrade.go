@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -102,10 +103,21 @@ func (r *DockerRuntime) PrepareArtifact(ctx context.Context, name string, opts U
 type jarArtifactTransaction struct {
 	r                             *JarRuntime
 	name, candidate, live, backup string
-	activated                     bool
+	activated, restore            bool
 }
 
 func (t *jarArtifactTransaction) Activate(ctx context.Context) error {
+	if t.restore {
+		if _, err := t.r.target.Exec(ctx, "mv", t.live, t.candidate); err != nil {
+			return fmt.Errorf("stage current jar: %w", err)
+		}
+		if _, err := t.r.target.Exec(ctx, "mv", t.backup, t.live); err != nil {
+			_, _ = t.r.target.Exec(ctx, "mv", t.candidate, t.live)
+			return fmt.Errorf("restore backup: %w", err)
+		}
+		t.activated = true
+		return nil
+	}
 	if _, err := t.r.target.Exec(ctx, "mv", t.live, t.backup); err != nil {
 		return fmt.Errorf("backup jar: %w", err)
 	}
@@ -138,7 +150,11 @@ func (t *jarArtifactTransaction) Rollback(ctx context.Context) error {
 	return nil
 }
 func (t *jarArtifactTransaction) Cleanup(ctx context.Context) error {
-	_, err := t.r.target.Exec(ctx, "rm", "-f", t.candidate, t.backup)
+	args := []string{"-f", t.candidate, t.backup}
+	if os.Getenv("TROND_PRESERVE_BACKUP") == "1" {
+		args = []string{"-f", t.candidate}
+	}
+	_, err := t.r.target.Exec(ctx, "rm", args...)
 	return err
 }
 
@@ -146,19 +162,28 @@ func (r *JarRuntime) PrepareArtifact(ctx context.Context, name string, opts Upgr
 	if err := validateUpgradeVersion(opts.Version); err != nil {
 		return nil, err
 	}
-	if opts.JarURL == "" {
-		return nil, fmt.Errorf("jar URL is required for artifact upgrade; provide --jar-url")
-	}
 	if r.purgeInstallPath == "" {
 		return nil, fmt.Errorf("install path is unavailable for artifact upgrade")
 	}
 	jarPath := filepath.Join(r.purgeInstallPath, "FullNode.jar")
 	candidate := jarPath + ".candidate"
+	backup := jarPath + ".upgrade.backup"
+	if opts.JarURL == "" {
+		if os.Getenv("TROND_NETWORK_UPGRADE") != "1" {
+			return nil, fmt.Errorf("jar URL is required for artifact upgrade; provide --jar-url")
+		}
+		// A network rollback consumes the backup made by the preceding
+		// upgrade. No download or operator-supplied URL is needed.
+		if _, err := r.target.Exec(ctx, "test", "-e", backup); err != nil {
+			return nil, fmt.Errorf("no upgrade backup found; cannot restore network upgrade")
+		}
+		return &jarArtifactTransaction{r: r, name: name, candidate: candidate, live: jarPath, backup: backup, restore: true}, nil
+	}
 	if err := r.downloadJar(ctx, opts.JarURL, candidate, opts.JarSHA256); err != nil {
 		_, _ = r.target.Exec(ctx, "rm", "-f", candidate)
 		return nil, fmt.Errorf("download jar: %w", err)
 	}
-	return &jarArtifactTransaction{r: r, name: name, candidate: candidate, live: jarPath, backup: jarPath + ".upgrade.backup"}, nil
+	return &jarArtifactTransaction{r: r, name: name, candidate: candidate, live: jarPath, backup: backup}, nil
 }
 
 var _ ArtifactUpgrader = (*DockerRuntime)(nil)

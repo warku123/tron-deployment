@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -186,6 +187,10 @@ func snapshotDownloadTool(ctx context.Context, req *mcp.CallToolRequest, args sn
 
 	res, err := snapshot.Download(ctx, opts)
 	if err != nil {
+		var running *snapshot.RunningNodeDestinationError
+		if errors.As(err, &running) {
+			return errResult(output.NewError("NODE_RUNNING", output.ExitGeneralError, err.Error()).WithSuggestions("Stop the node first: trond stop " + running.NodeName))
+		}
 		return errResult(err)
 	}
 	payload := map[string]any{

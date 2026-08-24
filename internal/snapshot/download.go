@@ -294,6 +294,9 @@ func Download(ctx context.Context, opts DownloadOptions) (*DownloadResult, error
 	if opts.Backup == "" {
 		return nil, errors.New("backup is required")
 	}
+	if err := RefuseRunningNodeDestination(opts.DestDir, ""); err != nil {
+		return nil, err
+	}
 	// Validate the pin before the transfer, not after: a typo'd digest
 	// should not cost the operator a multi-hour download.
 	expectedSHA256, err := normalizeSHA256(opts.ExpectedSHA256)

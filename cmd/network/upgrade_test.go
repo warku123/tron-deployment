@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tronprotocol/tron-deployment/internal/state"
 )
 
 func TestVerifyNodeInvokesVerifyForEachProjectedNode(t *testing.T) {
@@ -112,7 +114,7 @@ func TestFinishWithFailureRollsBackNodeWhoseVerifyFailed(t *testing.T) {
 		return nil
 	}
 
-	err := finishWithFailure(context.Background(), "", "net", "trond",
+	err := finishWithFailure(context.Background(), "", "net", "trond", nil,
 		[]upgradeStep{{Node: "net-node0", Phase: "upgrade", Status: "ok"},
 			{Node: "net-node0", Phase: "verify", Status: "failed"}},
 		[]string{"net-node0"}, time.Now(), "net-node0", errors.New("verify failed"))
@@ -168,9 +170,34 @@ func TestFinishWithFailureDoesNotPassUpgradeJarArgumentsToRollback(t *testing.T)
 		got = append([]string(nil), argv...)
 		return nil
 	}
-	_ = finishWithFailure(context.Background(), "", "net", "trond", nil, []string{"net-node0"}, time.Now(), "net-node1", errors.New("failed"))
+	_ = finishWithFailure(context.Background(), "", "net", "trond", nil, nil, []string{"net-node0"}, time.Now(), "net-node1", errors.New("failed"))
 	want := []string{"rollback", "net-node0"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rollback args = %v, want %v", got, want)
+	}
+}
+
+func TestRunNetworkChildOnlyInjectsUpgradeEnvForRollback(t *testing.T) {
+	st := &state.DeploymentState{Nodes: []state.ManagedNode{{Name: "net-node0", Runtime: "jar"}}}
+	old := runChildWithEnv
+	oldChild := runChild
+	defer func() { runChildWithEnv = old; runChild = oldChild }()
+	var envCalls [][]string
+	runChildWithEnv = func(_ context.Context, _ string, env []string, _ ...string) error {
+		envCalls = append(envCalls, append([]string(nil), env...))
+		return nil
+	}
+	runChild = func(context.Context, string, ...string) error { return nil }
+	if err := runNetworkChild(context.Background(), "trond", st, "net-node0", "upgrade", "net-node0"); err != nil {
+		t.Fatal(err)
+	}
+	if len(envCalls) != 1 || !reflect.DeepEqual(envCalls[0], []string{networkUpgradePreserveEnv}) {
+		t.Fatalf("upgrade env = %v, want [%s]", envCalls, networkUpgradePreserveEnv)
+	}
+	if err := runNetworkChild(context.Background(), "trond", st, "net-node0", "rollback", "net-node0"); err != nil {
+		t.Fatal(err)
+	}
+	if len(envCalls) != 2 || !reflect.DeepEqual(envCalls[1], []string{networkUpgradeRestoreEnv}) {
+		t.Fatalf("rollback env = %v, want [%s]", envCalls, networkUpgradeRestoreEnv)
 	}
 }

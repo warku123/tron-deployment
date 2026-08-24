@@ -51,6 +51,9 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
 	}
+	if len(parsed.Nodes) == 0 {
+		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, "intent must contain at least one node")
+	}
 
 	// 2. Load current state
 	store, err := state.NewStore(statePath())
@@ -65,7 +68,14 @@ func runPlan(cmd *cobra.Command, args []string) error {
 
 	existing := store.GetNode(deployState, parsed.Name)
 	if parsed.Target.AutoPorts && existing != nil {
-		apply.RestoreAutoPorts(&parsed.Nodes[0], existing)
+		rawParsed, rawErr := intent.LoadRaw(planIntentPath)
+		if rawErr != nil {
+			return exitWithError("VALIDATION_ERROR", output.ExitValidationError, rawErr.Error())
+		}
+		if len(rawParsed.Nodes) == 0 {
+			return exitWithError("VALIDATION_ERROR", output.ExitValidationError, "intent must contain at least one node")
+		}
+		apply.RestoreAutoPorts(&parsed.Nodes[0], existing, &rawParsed.Nodes[0])
 	}
 	rawIntent, err := os.ReadFile(planIntentPath)
 	if err != nil {

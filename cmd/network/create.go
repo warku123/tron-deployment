@@ -67,6 +67,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
 	}
+	rawParsed, err := intent.LoadRaw(createIntentPath)
+	if err != nil {
+		return output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error())
+	}
+	if len(parsed.Nodes) != len(rawParsed.Nodes) {
+		return output.NewError("VALIDATION_ERROR", output.ExitValidationError, "raw and effective intent node counts differ")
+	}
 
 	// --require-private: same machine-enforced safety gate as `apply`,
 	// applied to the multi-node path. Refuse a non-private network before
@@ -110,6 +117,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	deployState, err := store.Load()
 	if err != nil {
 		return output.NewError("STATE_ERROR", output.ExitGeneralError, err.Error())
+	}
+
+	// Restore persisted auto ports before auto-wiring peers. The peer
+	// addresses must use the same P2P ports that the existing nodes use.
+	for i := range parsed.Nodes {
+		restoreAutoPorts(parsed, i, rawParsed, deployState, store)
 	}
 
 	// Auto-wire peering between siblings before rendering. After
@@ -247,6 +260,22 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	output.WriteJSON(os.Stdout, result)
 	return nil
+}
+
+// restoreAutoPorts reuses ports recorded for a node before projecting the
+// network intent. This keeps a repeated network create from allocating a new
+// set of host ports and needlessly redeploying every node.
+func restoreAutoPorts(parsed *intent.Intent, i int, rawParsed *intent.Intent, deployState *state.DeploymentState, store *state.Store) {
+	if !parsed.Target.AutoPorts || i < 0 || i >= len(parsed.Nodes) {
+		return
+	}
+	if rawParsed == nil || i >= len(rawParsed.Nodes) {
+		return
+	}
+	nodeName := fmt.Sprintf("%s-node%d", parsed.Name, i)
+	if existing := store.GetNode(deployState, nodeName); existing != nil {
+		apply.RestoreAutoPorts(&parsed.Nodes[i], existing, &rawParsed.Nodes[i])
+	}
 }
 
 func countFailedDeployments(nodes []map[string]any) int {

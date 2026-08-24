@@ -51,27 +51,39 @@ func recordedMonitoringEnabled(existing *state.ManagedNode) bool {
 	return existing != nil && existing.Monitoring != nil && existing.Monitoring.Enabled
 }
 
-// RestoreAutoPorts restores all persisted auto-allocated ports into an intent.
-func RestoreAutoPorts(node *intent.NodeSpec, existing *state.ManagedNode) {
-	if existing.HTTPPort != 0 {
-		node.Ports.HTTP = existing.HTTPPort
+// RestoreAutoPorts restores persisted ports into an intent. The optional
+// explicit is optionally the raw, pre-defaults intent node. Its non-zero
+// ports win over persisted values; zero is the documented unset convention.
+// The optional form preserves compatibility with callers without raw intent.
+func RestoreAutoPorts(node *intent.NodeSpec, existing *state.ManagedNode, explicit ...*intent.NodeSpec) {
+	var userPorts *intent.PortMapping
+	if len(explicit) > 0 && explicit[0] != nil {
+		userPorts = &explicit[0].Ports
 	}
-	if existing.GRPCPort != 0 {
-		node.Ports.GRPC = existing.GRPCPort
+	if existing == nil {
+		return
 	}
-	if existing.P2PPort != 0 {
-		node.Ports.P2P = existing.P2PPort
+	restore := func(current, persisted, user int) int {
+		if userPorts != nil && user != 0 {
+			return current
+		}
+		if persisted != 0 {
+			return persisted
+		}
+		return current
 	}
-	if existing.MetricsPort != 0 {
-		node.Ports.Metrics = existing.MetricsPort
+	node.Ports.HTTP = restore(node.Ports.HTTP, existing.HTTPPort, portValue(userPorts, func(p intent.PortMapping) int { return p.HTTP }))
+	node.Ports.GRPC = restore(node.Ports.GRPC, existing.GRPCPort, portValue(userPorts, func(p intent.PortMapping) int { return p.GRPC }))
+	node.Ports.P2P = restore(node.Ports.P2P, existing.P2PPort, portValue(userPorts, func(p intent.PortMapping) int { return p.P2P }))
+	node.Ports.Metrics = restore(node.Ports.Metrics, existing.MetricsPort, portValue(userPorts, func(p intent.PortMapping) int { return p.Metrics }))
+	node.Ports.SolidityHTTP = restore(node.Ports.SolidityHTTP, existing.SolidityHTTPPort, portValue(userPorts, func(p intent.PortMapping) int { return p.SolidityHTTP }))
+	node.Ports.SolidityGRPC = restore(node.Ports.SolidityGRPC, existing.SolidityGRPCPort, portValue(userPorts, func(p intent.PortMapping) int { return p.SolidityGRPC }))
+	node.Ports.JSONRPC = restore(node.Ports.JSONRPC, existing.JSONRPCPort, portValue(userPorts, func(p intent.PortMapping) int { return p.JSONRPC }))
+}
+
+func portValue(ports *intent.PortMapping, get func(intent.PortMapping) int) int {
+	if ports == nil {
+		return 0
 	}
-	if existing.SolidityHTTPPort != 0 {
-		node.Ports.SolidityHTTP = existing.SolidityHTTPPort
-	}
-	if existing.SolidityGRPCPort != 0 {
-		node.Ports.SolidityGRPC = existing.SolidityGRPCPort
-	}
-	if existing.JSONRPCPort != 0 {
-		node.Ports.JSONRPC = existing.JSONRPCPort
-	}
+	return get(*ports)
 }

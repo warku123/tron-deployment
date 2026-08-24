@@ -69,6 +69,9 @@ func planTool(ctx context.Context, _ *mcp.CallToolRequest, args planArg) (*mcp.C
 	if err != nil {
 		return errResult(err)
 	}
+	if len(parsed.Nodes) == 0 {
+		return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, "intent must contain at least one node"))
+	}
 	node := &parsed.Nodes[0]
 	store, st, err := state.Load(paths.State())
 	if err != nil {
@@ -80,7 +83,14 @@ func planTool(ctx context.Context, _ *mcp.CallToolRequest, args planArg) (*mcp.C
 	}
 	existing := store.GetNode(st, parsed.Name)
 	if parsed.Target.AutoPorts && existing != nil {
-		apply.RestoreAutoPorts(node, existing)
+		rawParsed, rawErr := intent.LoadRaw(args.Path)
+		if rawErr != nil {
+			return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, rawErr.Error()))
+		}
+		if len(rawParsed.Nodes) == 0 {
+			return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, "intent must contain at least one node"))
+		}
+		apply.RestoreAutoPorts(node, existing, &rawParsed.Nodes[0])
 	}
 	planned, err := apply.Plan(parsed, existing, intentBytes, apply.FindTemplatesDir())
 	if err != nil {
@@ -126,6 +136,9 @@ func applyTool(ctx context.Context, _ *mcp.CallToolRequest, args applyArgs) (*mc
 	if err != nil {
 		return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, err.Error()))
 	}
+	if len(parsed.Nodes) == 0 {
+		return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, "intent must contain at least one node"))
+	}
 
 	// --require-private (early gate, precedence): refuse a non-private intent
 	// BEFORE target resolution and the HUMAN_REQUIRED change gate, so the
@@ -168,7 +181,14 @@ func applyTool(ctx context.Context, _ *mcp.CallToolRequest, args applyArgs) (*mc
 		return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, readErr.Error()))
 	}
 	if parsed.Target.AutoPorts && existing != nil {
-		apply.RestoreAutoPorts(&parsed.Nodes[0], existing)
+		rawParsed, rawErr := intent.LoadRaw(args.Path)
+		if rawErr != nil {
+			return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, rawErr.Error()))
+		}
+		if len(rawParsed.Nodes) == 0 {
+			return errResult(output.NewError("VALIDATION_ERROR", output.ExitValidationError, "intent must contain at least one node"))
+		}
+		apply.RestoreAutoPorts(&parsed.Nodes[0], existing, &rawParsed.Nodes[0])
 	}
 	templateDir := apply.FindTemplatesDir()
 	planned, err := apply.Plan(parsed, existing, intentBytes, templateDir)

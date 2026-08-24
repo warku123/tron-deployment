@@ -131,8 +131,18 @@ func runApply(cmd *cobra.Command, args []string) error {
 	existing := store.GetNode(deployState, parsed.Name)
 	if parsed.Target.AutoPorts && existing != nil {
 		if len(parsed.Nodes) == 1 {
-			apply.RestoreAutoPorts(&parsed.Nodes[0], existing)
+			rawParsed, rawErr := intent.LoadRaw(applyIntentPath)
+			if rawErr != nil {
+				return exitWithError("VALIDATION_ERROR", output.ExitValidationError, rawErr.Error())
+			}
+			if len(rawParsed.Nodes) == 0 {
+				return exitWithError("VALIDATION_ERROR", output.ExitValidationError, "intent must contain at least one node")
+			}
+			apply.RestoreAutoPorts(&parsed.Nodes[0], existing, &rawParsed.Nodes[0])
 		}
+	}
+	if len(parsed.Nodes) == 0 {
+		return exitWithError("VALIDATION_ERROR", output.ExitValidationError, "intent must contain at least one node")
 	}
 	canonicalIntent, err := yaml.Marshal(parsed)
 	if err != nil {

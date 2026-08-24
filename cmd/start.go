@@ -19,8 +19,9 @@ var startCmd = &cobra.Command{
 // saveStartState is a test injection seam; production default persists via nodeContext.SaveState.
 var saveStartState = func(nc *nodeContext) error { return nc.SaveState() }
 
-// resolveStartNodeContext is a test injection seam; production default resolves a read-only node context.
-var resolveStartNodeContext = resolveNodeContext
+// resolveStartNodeContext is a test injection seam; production default keeps
+// the state write lock until the caller has persisted its mutation.
+var resolveStartNodeContext = resolveNodeContextForWrite
 
 func init() {
 	rootCmd.AddCommand(startCmd)

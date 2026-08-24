@@ -95,3 +95,14 @@ func TestRestoreAutoPortsAllSeven(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreAutoPortsExplicitPortsWin(t *testing.T) {
+	n := &intent.NodeSpec{}
+	n.Ports.HTTP, n.Ports.GRPC = 9000, 9001
+	raw := &intent.NodeSpec{}
+	raw.Ports.HTTP, raw.Ports.GRPC = 9100, 0
+	apply.RestoreAutoPorts(n, &state.ManagedNode{HTTPPort: 8000, GRPCPort: 8001}, raw)
+	if n.Ports.HTTP != 9000 || n.Ports.GRPC != 8001 {
+		t.Fatalf("ports = %+v, want explicit HTTP and restored GRPC", n.Ports)
+	}
+}

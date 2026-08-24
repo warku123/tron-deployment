@@ -40,12 +40,50 @@ func TestSwapComposeImageTag(t *testing.T) {
 	}
 }
 
+func TestJarPrepareArtifactNetworkUpgradeRequiresBackup(t *testing.T) {
+	old := os.Getenv("TROND_NETWORK_UPGRADE")
+	t.Setenv("TROND_NETWORK_UPGRADE", "1")
+	t.Cleanup(func() { _ = os.Setenv("TROND_NETWORK_UPGRADE", old) })
+	r := NewJarRuntime(&missingBackupUpgradeTarget{fakeTarget: newFakeTarget()})
+	r.SetPurgeInstallPath("/install")
+	_, err := r.PrepareArtifact(context.Background(), "n1", UpgradeOpts{Version: "2"})
+	if err == nil || !strings.Contains(err.Error(), "no upgrade backup found") {
+		t.Fatalf("error = %v, want missing network upgrade backup", err)
+	}
+}
+
+func TestJarPrepareArtifactOrdinaryUpgradeDoesNotRestoreStaleBackup(t *testing.T) {
+	f := &jarUpgradeFakeTarget{newFakeTarget()}
+	f.files["/opt/tron/FullNode.jar.upgrade.backup"] = []byte("stale")
+	r := NewJarRuntime(f)
+	r.SetPurgeInstallPath("/opt/tron")
+	t.Setenv("TROND_NETWORK_UPGRADE", "")
+	_, err := r.PrepareArtifact(context.Background(), "n1", UpgradeOpts{Version: "2"})
+	if err == nil || !strings.Contains(err.Error(), "jar URL is required") {
+		t.Fatalf("error = %v, want ordinary upgrade URL validation", err)
+	}
+	if len(f.cmds) != 0 {
+		t.Fatalf("ordinary upgrade attempted restore commands: %v", f.cmds)
+	}
+}
+
 type upgradeFakeTarget struct {
 	*fakeTarget
 	pullErr error
 }
 
 type jarUpgradeFakeTarget struct{ *fakeTarget }
+
+type backupJarUpgradeFakeTarget struct{ *jarUpgradeFakeTarget }
+
+type missingBackupUpgradeTarget struct{ *fakeTarget }
+
+func (f *missingBackupUpgradeTarget) Exec(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+	if cmd == "test" {
+		return nil, errors.New("missing")
+	}
+	return f.fakeTarget.Exec(ctx, cmd, args...)
+}
 
 type remoteJarUpgradeFakeTarget struct {
 	*jarUpgradeFakeTarget
@@ -96,8 +134,19 @@ func (f *failingUpgradeTarget) Exec(ctx context.Context, cmd string, args ...str
 
 func (f *jarUpgradeFakeTarget) Exec(ctx context.Context, cmd string, args ...string) ([]byte, error) {
 	f.cmds = append(f.cmds, append([]string{cmd}, args...))
+	if cmd == "test" {
+		return nil, errors.New("missing")
+	}
 	if cmd == "sha256sum" {
 		return []byte("deadbeef  /opt/tron/FullNode.jar\n"), nil
+	}
+	return nil, nil
+}
+
+func (f *backupJarUpgradeFakeTarget) Exec(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+	f.cmds = append(f.cmds, append([]string{cmd}, args...))
+	if cmd == "test" {
+		return nil, nil
 	}
 	return nil, nil
 }
@@ -224,7 +273,7 @@ func countCommand(cmds [][]string, name string) int {
 
 func TestJarRuntimeUpgradeArtifact(t *testing.T) {
 	t.Run("missing URL", func(t *testing.T) {
-		r := NewJarRuntime(newFakeTarget())
+		r := NewJarRuntime(&jarUpgradeFakeTarget{newFakeTarget()})
 		r.SetPurgeInstallPath("/opt/tron")
 		if _, err := r.PrepareArtifact(context.Background(), "n1", UpgradeOpts{Version: "2"}); err == nil || !strings.Contains(err.Error(), "jar URL") {
 			t.Fatal(err)
@@ -337,6 +386,57 @@ func TestJarRuntimeUpgradeArtifact(t *testing.T) {
 			t.Fatalf("commands = %v", f.cmds)
 		}
 	})
+}
+
+func TestJarArtifactCleanupPreservesBackupForNetworkUpgrade(t *testing.T) {
+	f := &backupJarUpgradeFakeTarget{jarUpgradeFakeTarget: &jarUpgradeFakeTarget{newFakeTarget()}}
+	r := NewJarRuntime(f)
+	t.Setenv("TROND_PRESERVE_BACKUP", "1")
+	tx := &jarArtifactTransaction{r: r, candidate: "/opt/tron/FullNode.jar.candidate", live: "/opt/tron/FullNode.jar", backup: "/opt/tron/FullNode.jar.upgrade.backup"}
+	if err := tx.Cleanup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.cmds[len(f.cmds)-1]; !reflect.DeepEqual(got, []string{"rm", "-f", tx.candidate}) {
+		t.Fatalf("cleanup commands = %v, want candidate-only removal", f.cmds)
+	}
+}
+
+func TestJarArtifactCleanupDeletesBackupWithoutPreserveSignal(t *testing.T) {
+	f := &backupJarUpgradeFakeTarget{jarUpgradeFakeTarget: &jarUpgradeFakeTarget{newFakeTarget()}}
+	t.Setenv("TROND_NETWORK_UPGRADE", "")
+	t.Setenv("TROND_PRESERVE_BACKUP", "")
+	tx := &jarArtifactTransaction{r: NewJarRuntime(f), candidate: "/opt/tron/FullNode.jar.candidate", live: "/opt/tron/FullNode.jar", backup: "/opt/tron/FullNode.jar.upgrade.backup"}
+	if err := tx.Cleanup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.cmds[len(f.cmds)-1]; !reflect.DeepEqual(got, []string{"rm", "-f", tx.candidate, tx.backup}) {
+		t.Fatalf("cleanup commands = %v, want candidate and backup removal", f.cmds)
+	}
+}
+
+func TestJarArtifactRollbackConsumesPreservedBackupWithoutURL(t *testing.T) {
+	f := &backupJarUpgradeFakeTarget{jarUpgradeFakeTarget: &jarUpgradeFakeTarget{newFakeTarget()}}
+	r := NewJarRuntime(f)
+	r.SetPurgeInstallPath("/opt/tron")
+	t.Setenv("TROND_NETWORK_UPGRADE", "1")
+	tx, err := r.PrepareArtifact(context.Background(), "n1", UpgradeOpts{Version: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Activate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.cmds; !reflect.DeepEqual(got, [][]string{
+		{"test", "-e", "/opt/tron/FullNode.jar.upgrade.backup"},
+		{"mv", "/opt/tron/FullNode.jar", "/opt/tron/FullNode.jar.candidate"},
+		{"mv", "/opt/tron/FullNode.jar.upgrade.backup", "/opt/tron/FullNode.jar"},
+		{"systemctl", "start", "tron-n1.service"},
+	}) {
+		t.Fatalf("commands = %v", got)
+	}
 }
 
 func TestJarDeployInterruptedArtifactConvergesOnRerun(t *testing.T) {
