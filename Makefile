@@ -68,10 +68,13 @@ lint: $(GO_BOOTSTRAP)
 e2e: $(GO_BOOTSTRAP)
 	$(GO) test ./... -tags=e2e -race -count=1 -timeout 10m
 
-## verify: Pre-push gate — lint + unit tests + e2e (requires Docker daemon)
+## verify: Pre-push gate — lint + unit tests + e2e (requires Docker daemon).
+## Mirrors the CI jobs (golangci-lint, Test + coverage, e2e) so a green
+## local run means a green CI; run this before pushing.
 verify: lint test e2e
 
-## verify-fast: Fast pre-push gate — lint + unit tests (no Docker required)
+## verify-fast: Fast pre-push gate — lint + unit tests (no Docker required).
+## Same lint and unit jobs as CI; skips only the Docker-dependent e2e job.
 verify-fast: lint test
 
 ## build-all: Cross-compile for all supported platforms
