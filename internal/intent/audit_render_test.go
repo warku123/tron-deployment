@@ -39,3 +39,46 @@ func TestLoadWithOverlayPreservesUntouchedTargetFields(t *testing.T) {
 		t.Fatalf("target type=%q", got.Target.Type)
 	}
 }
+
+func TestLoadWithOverlayValidatesJarRuntimeAfterMerge(t *testing.T) {
+	const jarSHA256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const baseData = `name: jar-overlay-test
+network: nile
+target:
+  type: local
+  runtime: jar
+nodes:
+  - type: fullnode
+    jar:
+      url: https://example.com/FullNode.jar
+      sha256: ` + jarSHA256 + "\n"
+
+	for _, tc := range []struct {
+		name      string
+		overlay   string
+		wantError bool
+	}{
+		{name: "docker runtime rejects jar", overlay: "target:\n  runtime: docker\n", wantError: true},
+		{name: "jar runtime is valid", overlay: "target:\n  runtime: jar\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			base := dir + "/base.yaml"
+			overlay := dir + "/overlay.yaml"
+			if err := os.WriteFile(base, []byte(baseData), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(overlay, []byte(tc.overlay), 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := LoadWithOverlay(base, overlay)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("LoadWithOverlay error = %v, wantError=%v", err, tc.wantError)
+			}
+			if tc.wantError && !strings.Contains(err.Error(), "target.runtime: jar") {
+				t.Fatalf("error = %v, want jar runtime guidance", err)
+			}
+		})
+	}
+}

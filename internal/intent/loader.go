@@ -270,7 +270,29 @@ func Parse(data []byte) (*Intent, error) {
 	}
 
 	ApplyDefaults(&intent)
+	if err := ValidateJarRuntime(&intent); err != nil {
+		return nil, err
+	}
 	return &intent, nil
+}
+
+// ValidateJarRuntime rejects the unsupported docker + jar combination after
+// runtime defaults have been resolved. Both local and SSH jar deployments use
+// target.runtime=jar; target.type does not change that runtime value.
+func ValidateJarRuntime(intent *Intent) error {
+	rt := intent.Target.Runtime
+	if rt == "" {
+		rt = DefaultRuntime(intent)
+	}
+	if rt != "docker" {
+		return nil
+	}
+	for i, node := range intent.Nodes {
+		if node.Jar != nil {
+			return fmt.Errorf("nodes[%d]: jar source requires target.runtime=jar; docker runtime cannot consume jar — set target.runtime: jar", i)
+		}
+	}
+	return nil
 }
 
 // ParseRaw returns the parsed Intent with defaults NOT applied. Used by

@@ -31,6 +31,9 @@ func LoadWithOverlay(basePath, overlayPath string) (*Intent, error) {
 	}
 
 	ApplyDefaults(base)
+	if err := ValidateJarRuntime(base); err != nil {
+		return nil, err
+	}
 	return base, nil
 }
 

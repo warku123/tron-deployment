@@ -549,6 +549,9 @@ func validateOptions(o Options) error {
 		return output.NewErrorf("VALIDATION_ERROR", output.ExitValidationError,
 			"node %q: build, image, jar are mutually exclusive (pick one artifact source)", n.Type)
 	}
+	if err := intent.ValidateJarRuntime(o.Intent); err != nil {
+		return output.NewErrorf("VALIDATION_ERROR", output.ExitValidationError, "%v", err)
+	}
 
 	// Phase 2 only wires artifact=jar end-to-end. The artifact_kind
 	// must match the runtime, otherwise we'd render a docker compose
