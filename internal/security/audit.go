@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"time"
+
+	"github.com/tronprotocol/tron-deployment/internal/paths"
 )
 
 // AuditEntry represents a single audit log line.

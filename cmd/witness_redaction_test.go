@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"github.com/tronprotocol/tron-deployment/internal/render"
 	"strings"
 	"testing"
+
+	"github.com/tronprotocol/tron-deployment/internal/render"
 )
 
 // F3 regression tests for the two positional, LCS-free differs that

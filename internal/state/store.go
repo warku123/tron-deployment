@@ -3,9 +3,10 @@ package state
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"os"
 	"path/filepath"
+
+	"github.com/tronprotocol/tron-deployment/internal/paths"
 )
 
 const stateFileVersion = 1

@@ -233,15 +233,6 @@ func writePlanFixture(t *testing.T, name string) string {
 	}
 	return p
 }
-func mustRead(t *testing.T, p string) []byte {
-	t.Helper()
-	b, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
 func TestSnapshotDownloadMissingDestUsesValidationEnvelope(t *testing.T) {
 	res, _, err := snapshotDownloadTool(context.Background(), nil, snapshotDownloadArgs{Network: "nile"})
 	if err != nil {

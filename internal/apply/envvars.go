@@ -1,8 +1,9 @@
 package apply
 
 import (
-	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"os"
+
+	"github.com/tronprotocol/tron-deployment/internal/intent"
 )
 
 // ResolveEnvVars resolves the legacy witness-key environment reference.

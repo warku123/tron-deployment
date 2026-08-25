@@ -187,12 +187,6 @@ func runBroadcast(ctx context.Context, cfg *Config) error {
 	return nil
 }
 
-// streamCSV reads `path` (skipping the header) and pushes (txID, json)
-// pairs onto out. Returns the number of rows pushed.
-func streamCSV(path string, out chan<- [2]string) (int, error) {
-	return streamCSVContext(context.Background(), path, out)
-}
-
 func streamCSVContext(ctx context.Context, path string, out chan<- [2]string) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -227,11 +221,6 @@ func streamCSVContext(ctx context.Context, path string, out chan<- [2]string) (i
 		count++
 	}
 	return count, nil
-}
-
-func runCSVProducer(ctx context.Context, path string, out chan<- [2]string, done chan<- struct{}) {
-	defer close(done)
-	_, _ = streamCSVContext(ctx, path, out)
 }
 
 func truncate(s string, n int) string {

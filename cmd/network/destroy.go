@@ -116,7 +116,6 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		networkTargets[key] = tgt
-		defer closeTarget(tgt)
 	}
 
 	var removed []string
@@ -158,6 +157,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := store.Save(deployState); err != nil {
+		closeTargets(networkTargets)
 		// State save failure is rare but real; surface it instead of
 		// claiming success with a stale state file on disk.
 		return output.NewError("STATE_ERROR", output.ExitGeneralError,
@@ -171,7 +171,6 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to remove monitoring stack: %v\n", err)
 		}
 	}
-
 	// Tear down the shared docker network the matching `network create`
 	// stood up. Best-effort: a leftover network is harmless on next
 	// run (create re-uses it), so we ignore failures rather than
@@ -181,6 +180,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			_, _ = networkTarget.Exec(cmd.Context(), "docker", "network", "rm", "trond-"+destroyConfirm)
 		}
 	}
+	closeTargets(networkTargets)
 
 	if len(failures) > 0 {
 		auditResult = "partial"
@@ -239,5 +239,11 @@ func resolveRuntimeForNode(n *state.ManagedNode, tgt target.Target) runtime.Runt
 func closeTarget(t target.Target) {
 	if c, ok := any(t).(interface{ Close() error }); ok {
 		_ = c.Close()
+	}
+}
+
+func closeTargets(targets map[string]target.Target) {
+	for _, tgt := range targets {
+		closeTarget(tgt)
 	}
 }

@@ -112,7 +112,7 @@ func TestSource_Resolve_NoUntrackedHashUnchanged(t *testing.T) {
 
 func TestSource_Resolve_IgnoredUntrackedDoesNotChangeHash(t *testing.T) {
 	dir := initGitRepo(t)
-	baseline := resolveSource(t, dir).PatchHash
+	var baseline string
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("ignored/\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

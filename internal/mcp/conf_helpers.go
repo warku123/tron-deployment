@@ -20,5 +20,5 @@ func readLiveConfigForMCP(ctx context.Context, tgt target.Target, node *state.Ma
 		}
 		return "", fmt.Errorf("docker exec cat: %w", err)
 	}
-	return string(out), nil
+	return out, nil
 }

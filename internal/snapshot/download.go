@@ -368,7 +368,7 @@ func Download(ctx context.Context, opts DownloadOptions) (*DownloadResult, error
 	if err != nil {
 		return nil, fmt.Errorf("create snapshot stage: %w", err)
 	}
-	defer os.RemoveAll(stage)
+	defer func() { _ = os.RemoveAll(stage) }()
 
 	start := time.Now()
 	url := pre.URL
@@ -478,7 +478,7 @@ func publishSnapshot(stage, dest string, force bool) error {
 		if backupErr != nil {
 			return fmt.Errorf("create snapshot backup: %w", backupErr)
 		}
-		os.RemoveAll(backup)
+		_ = os.RemoveAll(backup)
 		if err := snapshotRename(target, backup); err != nil {
 			return fmt.Errorf("stage existing snapshot: %w", err)
 		}

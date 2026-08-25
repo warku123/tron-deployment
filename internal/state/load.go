@@ -7,7 +7,8 @@ func LoadNode(path, name string) (*Store, *DeploymentState, *ManagedNode, error)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return store, st, store.GetNode(st, name), nil
+	node := store.GetNode(st, name)
+	return store, st, node, nil
 }
 
 // Load opens a Store and loads its deployment state without acquiring a lock.

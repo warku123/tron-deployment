@@ -3,10 +3,11 @@ package cmd
 import (
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/tronprotocol/tron-deployment/internal/apply"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/state"
-	"gopkg.in/yaml.v3"
 )
 
 func TestLegacyIntentHashMatchesRawHash(t *testing.T) {
@@ -20,7 +21,9 @@ func TestLegacyIntentHashMatchesRawHash(t *testing.T) {
 
 func TestVersionedIntentHashIsStable(t *testing.T) {
 	data := []byte("effective intent")
-	if apply.EffectiveIntentHash(data) != apply.EffectiveIntentHash(data) {
+	first := apply.EffectiveIntentHash(data)
+	second := apply.EffectiveIntentHash(append([]byte(nil), data...))
+	if first != second {
 		t.Fatal("versioned hash is unstable")
 	}
 	if apply.EffectiveIntentHash(data) == string(data) {

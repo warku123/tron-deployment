@@ -31,13 +31,6 @@ type planArg struct {
 	Path string `json:"path" jsonschema:"absolute path to an intent.yaml file"`
 }
 
-func boolToDowntime(changed bool) int {
-	if changed {
-		return 30
-	}
-	return 0
-}
-
 func registerLifecycleTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "plan",

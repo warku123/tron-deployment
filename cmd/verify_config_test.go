@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"github.com/tronprotocol/tron-deployment/internal/render"
 	"strings"
 	"testing"
+
+	"github.com/tronprotocol/tron-deployment/internal/render"
 )
 
 // TestLineDiff_PinsContractShape exercises the small diff helper

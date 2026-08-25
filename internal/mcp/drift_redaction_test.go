@@ -3,11 +3,12 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"github.com/tronprotocol/tron-deployment/internal/render"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tronprotocol/tron-deployment/internal/render"
 )
 
 // F3 regression test for mcpLineDiff. Its output is returned as an MCP

@@ -387,7 +387,8 @@ func (r *sshStreamReader) Close() error {
 		close(r.watchStop)
 		<-r.watchDone
 		var waitErr error
-		if r.processDone != nil && r.streamDone != nil {
+		switch {
+		case r.processDone != nil && r.streamDone != nil:
 			select {
 			case <-r.streamDone:
 				waitErr = <-r.processDone
@@ -395,14 +396,14 @@ func (r *sshStreamReader) Close() error {
 				r.terminate()
 				waitErr = <-r.processDone
 			}
-		} else if r.processDone != nil {
+		case r.processDone != nil:
 			select {
 			case waitErr = <-r.processDone:
 			default:
 				r.terminate()
 				waitErr = <-r.processDone
 			}
-		} else {
+		default:
 			r.terminate()
 			waitErr = r.wait()
 		}

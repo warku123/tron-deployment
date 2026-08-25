@@ -13,12 +13,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/tronprotocol/tron-deployment/internal/guard"
 	"github.com/tronprotocol/tron-deployment/internal/intent"
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/state"
-	"gopkg.in/yaml.v3"
 )
 
 // upgradeCmd does a rolling upgrade across every node in a private
@@ -340,6 +341,9 @@ func verifyNode(ctx context.Context, exe, node, intentPath string, timeout time.
 	for i := range parsed.Nodes {
 		if fmt.Sprintf("%s-node%d", parsed.Name, i) == node {
 			projected, _, _, err = nodeIntent(parsed, i)
+			if err != nil {
+				return fmt.Errorf("project node %s for verify: %w", node, err)
+			}
 			break
 		}
 	}
