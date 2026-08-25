@@ -49,6 +49,17 @@ func (c *changeTracker) write(ctx context.Context, path string, data []byte, per
 	return c.target.WriteFile(ctx, path, data, perm)
 }
 
+// remove deletes path, recording a change when the file existed. A removed
+// systemd drop-in must cause a restart just like a rewritten one, otherwise
+// the running process keeps the old environment until its next restart.
+func (c *changeTracker) remove(ctx context.Context, path string) error {
+	if _, err := c.target.ReadFile(ctx, path); err == nil {
+		c.changed = true
+	}
+	_, err := c.target.Exec(ctx, "rm", "-f", path)
+	return err
+}
+
 // LogOpts configures log retrieval.
 type LogOpts struct {
 	Tail   int

@@ -62,7 +62,7 @@ func TestTargetRuntime_Enum(t *testing.T) {
 	}{
 		{"docker", false},
 		{"jar", false},
-		{"", false}, // omitted → default "docker"
+		{"", false}, // explicit empty value accepted by omitempty
 		{"podman", true},
 		{"systemd", true},
 	}
@@ -70,12 +70,9 @@ func TestTargetRuntime_Enum(t *testing.T) {
 		t.Run("runtime="+tc.val, func(t *testing.T) {
 			y := "target:\n  type: local\n  runtime: " + tc.val + "\n"
 			if tc.val == "" {
-				y = ""
+				y = "target:\n  type: local\n  runtime: \"\"\n"
 			}
 			yaml := []byte("name: m\nnetwork: mainnet\n" + y + "nodes: [{type: fullnode}]\n")
-			if y == "" {
-				yaml = []byte("name: m\nnetwork: mainnet\ntarget: {type: local}\nnodes: [{type: fullnode}]\n")
-			}
 			_, err := Parse(yaml)
 			if tc.wantErr && err == nil {
 				t.Errorf("expected error for runtime=%q", tc.val)

@@ -262,6 +262,47 @@ func TestJarRuntime_Deploy_EnvVarsAllSurvive(t *testing.T) {
 	}
 }
 
+func TestJarRuntime_Deploy_EmptyEnvVarsRemovesOldDropIn(t *testing.T) {
+	ft := newFakeTarget()
+	rt := NewJarRuntime(ft)
+	ctx := context.Background()
+	base := DeployOpts{
+		Name:        "n1",
+		JarPath:     "/opt/tron/FullNode.jar",
+		ConfigData:  []byte("a = 1\n"),
+		SystemdData: []byte("[Service]\n"),
+	}
+	withEnv := base
+	withEnv.EnvVars = map[string]string{"SR_PRIVATE_KEY": "deadbeef"}
+	if err := rt.Deploy(ctx, withEnv); err != nil {
+		t.Fatalf("Deploy with env: %v", err)
+	}
+	ft.cmds = nil
+	if err := rt.Deploy(ctx, base); err != nil {
+		t.Fatalf("Deploy without env: %v", err)
+	}
+
+	envPath := "/etc/systemd/system/tron-n1.service.d/env.conf"
+	if cmd := findCmd(ft.cmds, "rm", "-f", envPath); cmd == nil {
+		t.Fatalf("old environment drop-in was not removed; commands: %v", ft.cmds)
+	}
+	if findCmd(ft.cmds, "systemctl", "restart", "tron-n1.service") == nil {
+		t.Fatalf("service was not restarted after removing environment drop-in; commands: %v", ft.cmds)
+	}
+}
+
+func TestJarRuntime_RemoveCleansDropIn(t *testing.T) {
+	ft := newFakeTarget()
+	rt := NewJarRuntime(ft)
+	if err := rt.Remove(context.Background(), "n1", false); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	overridePath := "/etc/systemd/system/tron-n1.service.d"
+	if cmd := findCmd(ft.cmds, "rm", "-rf", overridePath); cmd == nil {
+		t.Fatalf("override directory was not removed; commands: %v", ft.cmds)
+	}
+}
+
 func TestMonitoringRuntime_Deploy_ScrapeConfigChangeForcesRecreate(t *testing.T) {
 	opts := func(scrape string) MonitoringDeployOpts {
 		return MonitoringDeployOpts{

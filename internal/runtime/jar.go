@@ -106,6 +106,15 @@ func (r *JarRuntime) Deploy(ctx context.Context, opts DeployOpts) error {
 		if err := tracker.write(ctx, envPath, []byte(sb.String()), 0600); err != nil {
 			return fmt.Errorf("write env override: %w", err)
 		}
+	} else {
+		// An empty EnvVars map means the service must not inherit a drop-in
+		// from an earlier deploy. Remove it and track the change so a running
+		// JVM cannot retain the old environment.
+		envPath := filepath.Join(
+			fmt.Sprintf("/etc/systemd/system/%s.d", unitName), "env.conf")
+		if err := tracker.remove(ctx, envPath); err != nil {
+			return fmt.Errorf("remove env override: %w", err)
+		}
 	}
 
 	if _, err := r.target.Exec(ctx, "systemctl", "daemon-reload"); err != nil {

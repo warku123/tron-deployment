@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Jar intent nodes no longer receive the default Docker image, which
+  previously made `apply` reject mutually-exclusive artifact sources. Jar
+  plus Docker runtime is now rejected up front with a clear error pointing to
+  `target.runtime=jar` (commit fde40dd).
+- `diagnose` and `heal` now use the node's recorded network for
+  private-network gating checks (AUD-044; commit 8ad9c5a).
 - **P0 audit remediation.** Batch B adds focused cmd-side test splits for
   `cmd/build`, `cmd/state`, `cmd/network create`, and `cmd/apply` (B1–B8),
   while domain 1–5 fixes harden lifecycle, state persistence, target
