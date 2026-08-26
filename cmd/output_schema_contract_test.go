@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -52,6 +53,46 @@ func TestOutputSchemaContracts(t *testing.T) {
 		}
 		validateOutputSchema(t, "events", value)
 	})
+
+	t.Run("status intent hash", func(t *testing.T) {
+		for _, hash := range []string{"v2:" + strings64('a'), strings64('b')} {
+			if err := validateSchemaValue("status", map[string]any{
+				"name": "contract-node", "status": "running", "intent_hash": hash,
+			}); err != nil {
+				t.Fatalf("valid intent_hash %q failed schema: %v", hash, err)
+			}
+		}
+		if err := validateSchemaValue("status", map[string]any{
+			"name": "contract-node", "status": "running", "intent_hash": "v2:xyz",
+		}); err == nil {
+			t.Fatal("invalid status intent_hash unexpectedly passed schema")
+		}
+	})
+}
+
+func validateSchemaValue(name string, value any) error {
+	doc, ok := schema.Get(name)
+	if !ok {
+		return fmt.Errorf("embedded schema %q missing", name)
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	compiledDoc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	compiler := jsonschema.NewCompiler()
+	const id = "https://trond.test/schema.json"
+	if err := compiler.AddResource(id, compiledDoc); err != nil {
+		return err
+	}
+	compiled, err := compiler.Compile(id)
+	if err != nil {
+		return err
+	}
+	return compiled.Validate(value)
 }
 
 func validateOutputSchema(t *testing.T, name string, value any) {

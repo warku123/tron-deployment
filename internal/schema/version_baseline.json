@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.15.1",
+  "schema_version": "1.16.0",
   "entries": [
     {
       "name": "apply",
@@ -123,7 +123,7 @@
     },
     {
       "name": "status",
-      "hash": "cf12a8dd02e89813be667a722c2295466c830483a4f2ad547314fda3f096556f"
+      "hash": "13ea4afc35ec6547e750cf589810a0d36fe1f02aebca2b450b79dc66cfe86c4f"
     },
     {
       "name": "verify",

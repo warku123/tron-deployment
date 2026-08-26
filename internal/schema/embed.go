@@ -119,7 +119,10 @@ import (
 //	        `md5_verified: false` on a successful download means one
 //	        thing only: the operator passed `--no-verify` / `no_verify`.
 //	        One existing schema, one additive optional field — PATCH.
-const SchemaVersion = "1.15.1"
+// 1.16.0 — status intent_hash accepts the versioned `v2:` + 64-hex
+// format while retaining the legacy bare 64-hex format. Additive
+// compatibility widening — MINOR.
+const SchemaVersion = "1.16.0"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

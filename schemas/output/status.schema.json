@@ -26,7 +26,7 @@
       "format": "date-time",
       "description": "Timestamp of the last apply that modified state."
     },
-    "intent_hash":  { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "intent_hash":  { "type": "string", "pattern": "^(v2:)?[0-9a-f]{64}$" },
     "config_hash":  { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "api_endpoints": {
       "type": "object",

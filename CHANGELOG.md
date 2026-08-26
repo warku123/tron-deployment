@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `status` output schema now accepts versioned intent hashes (`v2:` prefix),
+  fixing schema-validation failures against real `status` output; contract test
+  coverage extended to status. (council R2 finding)
 - Jar intent nodes no longer receive the default Docker image, which
   previously made `apply` reject mutually-exclusive artifact sources. Jar
   plus Docker runtime is now rejected up front with a clear error pointing to

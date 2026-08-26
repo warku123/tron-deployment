@@ -85,3 +85,48 @@ up cold.
 - **Context:** flagged by the 2026-06 eng-review of the C1 private-net PR
   (Issue 4 / Codex #7). Documented in AGENTS.md's safety section meanwhile.
 - **Depends on:** a deliberate schema-version major bump.
+
+## Jar remove should scrub retained witness key
+
+- **What:** `trond remove` without purge (`--keep-data`) may leave an inline
+  witness key in `config.conf` under the install directory; assess default
+  scrubbing or document the retained secret clearly.
+- **Context:** Council R2 skeptic.
+
+## Preserve change tracking on remove read errors
+
+- **What:** `changeTracker.remove` treats non-NotExist `ReadFile` errors
+  (SSH/permission transient) as absent; a successful `rm` then leaves
+  `changed` false, so a running JVM retains old env until restart. Distinguish
+  errors or conservatively set `changed`, and add read-error+rm-success
+  coverage.
+- **Priority:** P2.
+- **Context:** Council R2 skeptic.
+
+## Reject control characters in systemd drop-in Environment values
+
+- **What:** Reject control characters in drop-in `Environment=` values; newline
+  or `#` could theoretically inject extra systemd directives.
+- **Priority:** P3; operator-self threat model, low risk.
+- **Context:** Council R2 implementer.
+
+## Add real systemd lifecycle E2E coverage
+
+- **What:** Real systemd E2E for `daemon-reload`, `enable`, `is-active`, and
+  journal semantics is missing; add a systemd runner or formally declare the
+  support boundary.
+- **Status:** UNVERIFIED.
+- **Context:** Council R1/R2.
+
+## Define state-save failure reconciliation
+
+- **What:** Define recovery and consistency semantics when runtime mutation
+  succeeds but state save fails, including a reconcile strategy.
+- **Context:** Council R1 skeptic,洞#8.
+
+## Expand schema producer/consumer contract coverage
+
+- **What:** Output schema↔producer bidirectional assertions currently cover
+  only apply/events/status; extend them to every output schema. Also declare
+  `intent_hash` in `inspect.schema.json`.
+- **Context:** Council R2 architect; long-term debt.
