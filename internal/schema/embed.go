@@ -119,6 +119,7 @@ import (
 //	        `md5_verified: false` on a successful download means one
 //	        thing only: the operator passed `--no-verify` / `no_verify`.
 //	        One existing schema, one additive optional field — PATCH.
+//
 // 1.16.0 — status intent_hash accepts the versioned `v2:` + 64-hex
 // format while retaining the legacy bare 64-hex format. Additive
 // compatibility widening — MINOR.
