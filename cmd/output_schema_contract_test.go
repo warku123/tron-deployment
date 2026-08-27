@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,6 +67,58 @@ func TestOutputSchemaContracts(t *testing.T) {
 			"name": "contract-node", "status": "running", "intent_hash": "v2:xyz",
 		}); err == nil {
 			t.Fatal("invalid status intent_hash unexpectedly passed schema")
+		}
+	})
+
+	// Synthetic status payload exercising the additive `monitoring` block
+	// (schema 1.16.1): both ports must be integers, the probed health must
+	// stay inside its enum, and all three keys are required.
+	t.Run("status monitoring", func(t *testing.T) {
+		if err := validateSchemaValue("status", map[string]any{
+			"name": "contract-node", "status": "running",
+			"monitoring": map[string]any{
+				"prometheus_port": 9090,
+				"grafana_port":    3000,
+				"status":          "running",
+			},
+		}); err != nil {
+			t.Fatalf("valid monitoring object failed schema: %v", err)
+		}
+		for name, mon := range map[string]map[string]any{
+			"port not an integer":  {"prometheus_port": "9090", "grafana_port": 3000, "status": "running"},
+			"status outside enum":  {"prometheus_port": 9090, "grafana_port": 3000, "status": "degraded"},
+			"missing grafana_port": {"prometheus_port": 9090, "status": "running"},
+		} {
+			if err := validateSchemaValue("status", map[string]any{
+				"name": "contract-node", "status": "running", "monitoring": mon,
+			}); err == nil {
+				t.Errorf("invalid monitoring (%s) unexpectedly passed schema", name)
+			}
+		}
+	})
+
+	// Mirror of the status intent-hash subtest above for inspect node
+	// entries: versioned `v2:` and legacy bare digests are accepted;
+	// everything else is refused.
+	t.Run("inspect intent hash", func(t *testing.T) {
+		nodeWithHash := func(hash string) map[string]any {
+			return map[string]any{
+				"nodes": []any{map[string]any{"name": "contract-node", "intent_hash": hash}},
+			}
+		}
+		for _, hash := range []string{"v2:" + strings64('a'), strings64('b')} {
+			if err := validateSchemaValue("inspect", nodeWithHash(hash)); err != nil {
+				t.Fatalf("valid intent_hash %q failed schema: %v", hash, err)
+			}
+		}
+		for _, hash := range []string{
+			strings.ToUpper(strings64('c')), // uppercase hex is not [0-9a-f]
+			"v3:" + strings64('d'),          // unknown version prefix
+			strings64('e')[:63],             // truncated digest
+		} {
+			if err := validateSchemaValue("inspect", nodeWithHash(hash)); err == nil {
+				t.Errorf("invalid inspect intent_hash %q unexpectedly passed schema", hash)
+			}
 		}
 	})
 }

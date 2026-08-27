@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Agent guide no longer claims `network create` stops at the first failed
+  node: the command attempts every node in turn, aggregates failures into
+  `DEPLOY_ERROR` (exit 1), and leaves successfully deployed nodes running
+  and recorded in state for reconciliation on re-run.
+- `network destroy` partial-failure error message now states the actual
+  state semantics: removed entries are gone from state, failed entries
+  REMAIN in state and can be retried (previously claimed the state was
+  "cleaned up regardless"). Part of the #225/#226 correction chain — the
+  earlier guide text was written on top of trond's own lying runtime
+  error message.
 - `status` output schema now accepts versioned intent hashes (`v2:` prefix),
   fixing schema-validation failures against real `status` output; contract test
   coverage extended to status. (council R2 finding)
