@@ -203,7 +203,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	output.WriteJSON(os.Stdout, result)
 	if len(failures) > 0 {
 		return output.NewError("PARTIAL_SUCCESS", output.ExitGeneralError,
-			fmt.Sprintf("%d node(s) failed to destroy; state cleaned up regardless", len(failures)))
+			fmt.Sprintf("partial success: %d node(s) failed to destroy; removed entries are gone from state, failed entries REMAIN in state and can be retried", len(failures)))
 	}
 	return nil
 }
