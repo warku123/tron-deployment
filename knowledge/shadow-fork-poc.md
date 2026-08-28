@@ -16,8 +16,8 @@ this doc explains what each step does + how to verify success.
 - Docker + docker-compose running
 - ~30 GB free disk (lite Nile snapshot is ~10-20 GB; extraction +
   scratch overhead)
-- Python 3 with `tronpy` for the witness keypair generation:
-  `pip install tronpy`
+- Nothing else: the witness keypair comes from `trond shadow-fork
+  keygen`, which the script calls for you.
   - OR provide your own via `SHADOW_FORK_WITNESS_KEY` (hex private
     key) and `SHADOW_FORK_WITNESS_ADDRESS` (Base58Check TRON
     address) env vars.
@@ -51,7 +51,8 @@ Or run the four phases individually for inspection:
    download --network nile --type lite --to ./shadow-fork-data`.
    Idempotent — re-runs detect the existing `output-directory/`
    and skip.
-2. Generates a fresh secp256k1 witness keypair via `tronpy`,
+2. Generates a fresh secp256k1 witness keypair via
+   `trond shadow-fork keygen`,
    stashing it in `.shadow-fork-witness.env` (gitignored). The
    address is what fork.conf installs as the active witness; the
    private key is what the trond intent's witness_key resolves
@@ -260,6 +261,33 @@ unconstrained second container can OOM-kill the existing tenant.
 The 2026-05-25/26 e2e runs deliberately picked alternate ports
 58090/60051/58545/58888/59527 and the 5g heap cap to coexist with a
 running mainnet fullnode on the same box without disruption.
+
+## Forking mainnet, and running a full witness slate
+
+Both are environment variables on the script:
+
+```bash
+SHADOW_FORK_NETWORK=mainnet SHADOW_FORK_WITNESS_COUNT=27 \
+  ./scripts/poc-shadow-fork.sh all
+```
+
+`SHADOW_FORK_NETWORK` picks the chain the snapshot comes from and is
+carried into the intent's `network`, which has to match it — see the
+network-isolation note below for why. A mainnet lite snapshot is
+~90 GB against Nile's ~10-20 GB.
+
+`SHADOW_FORK_WITNESS_COUNT` is what buys finality. One witness produces
+blocks but the confirmation count stays at 1, so nothing ever
+solidifies; a slate large enough for 2/3 agreement does. The script
+generates that many keypairs, writes one `witnesses` entry and one
+funded account per witness into fork.conf, gives each node its own
+ports and data directory, and deploys through `trond network create`
+rather than `apply` so the peers are wired to each other.
+
+Each extra witness is another full copy of the mutated database:
+java-tron opens its LevelDB exclusively, so the nodes cannot share one
+directory. Budget disk accordingly — 27 witnesses on a mainnet
+snapshot is ~2.4 TB.
 
 ## Phase 1 caveats
 
