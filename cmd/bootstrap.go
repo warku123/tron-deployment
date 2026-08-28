@@ -15,6 +15,8 @@ import (
 
 var bootstrapIntentPath string
 
+var bootstrapResolveTarget = resolveTarget
+
 var bootstrapCmd = &cobra.Command{
 	Use:   "bootstrap",
 	Short: "Install prerequisites on the target",
@@ -38,7 +40,7 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	tgt, err := resolveTarget(parsed)
+	tgt, err := bootstrapResolveTarget(parsed)
 	if err != nil {
 		return exitWithError("TARGET_UNREACHABLE", output.ExitTargetUnreachable, err.Error())
 	}

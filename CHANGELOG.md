@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SSH bootstrap provisioning mode is restored, so package-manager, shell, and
+  user-creation commands are allowed only during `bootstrap`.
+- Network upgrade backup cleanup now executes `rm` through the target layer;
+  cleanup failures are reported as warnings instead of misreporting a successful
+  upgrade as `UPGRADE_ERROR`.
 - Agent guide no longer claims `network create` stops at the first failed
   node: the command attempts every node in turn, aggregates failures into
   `DEPLOY_ERROR` (exit 1), and leaves successfully deployed nodes running

@@ -40,6 +40,8 @@ type SSHTarget struct {
 	provisioning bool
 }
 
+var _ interface{ SetProvisioning(bool) } = (*SSHTarget)(nil)
+
 var sshNetDialContext = (&net.Dialer{}).DialContext
 
 func (t *SSHTarget) DialContext(_ context.Context, network, addr string) (net.Conn, error) {
@@ -167,6 +169,12 @@ func (t *SSHTarget) ConnectContext(ctx context.Context) error {
 // IsRemote marks targets whose artifacts must be downloaded by the local
 // process and uploaded over the target connection.
 func (t *SSHTarget) IsRemote() bool { return true }
+
+// SetProvisioning puts the target in provisioning mode, allowing the
+// package-manager and shell commands host preparation needs. It is
+// deliberately not part of the target.Target interface: no lifecycle code
+// path and no `trond exec` invocation can reach it.
+func (t *SSHTarget) SetProvisioning(on bool) { t.provisioning = on }
 
 // hostKeyCallback returns a verifier backed by known_hosts. Falls back to
 // ~/.ssh/known_hosts when no explicit file is configured.

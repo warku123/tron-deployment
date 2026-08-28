@@ -11,7 +11,19 @@ import (
 	"time"
 
 	"github.com/tronprotocol/tron-deployment/internal/state"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
+
+type cleanupFakeTarget struct {
+	*target.LocalTarget
+	args []string
+	err  error
+}
+
+func (t *cleanupFakeTarget) Exec(_ context.Context, cmd string, args ...string) ([]byte, error) {
+	t.args = append([]string{cmd}, args...)
+	return nil, t.err
+}
 
 func TestVerifyNodeInvokesVerifyForEachProjectedNode(t *testing.T) {
 	dir := t.TempDir()
@@ -199,5 +211,37 @@ func TestRunNetworkChildOnlyInjectsUpgradeEnvForRollback(t *testing.T) {
 	}
 	if len(envCalls) != 2 || !reflect.DeepEqual(envCalls[1], []string{networkUpgradeRestoreEnv}) {
 		t.Fatalf("rollback env = %v, want [%s]", envCalls, networkUpgradeRestoreEnv)
+	}
+}
+
+func TestCleanupNetworkBackupUsesRmArgv(t *testing.T) {
+	fake := &cleanupFakeTarget{LocalTarget: target.NewLocalTarget()}
+	old := fromManagedNode
+	fromManagedNode = func(*state.ManagedNode) (target.Target, error) { return fake, nil }
+	defer func() { fromManagedNode = old }()
+
+	st := &state.DeploymentState{Nodes: []state.ManagedNode{{
+		Name: "net-node0", Runtime: "jar", InstallPath: "/srv/tron path",
+	}}}
+	if err := cleanupNetworkBackup(context.Background(), st, "net-node0"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"rm", "-f", "--", "/srv/tron path/FullNode.jar.upgrade.backup"}
+	if !reflect.DeepEqual(fake.args, want) {
+		t.Fatalf("cleanup argv = %q, want %q", fake.args, want)
+	}
+}
+
+func TestCleanupNetworkBackupsReturnsWarningWithoutUpgradeFailure(t *testing.T) {
+	fake := &cleanupFakeTarget{LocalTarget: target.NewLocalTarget(), err: errors.New("rm failed")}
+	old := fromManagedNode
+	fromManagedNode = func(*state.ManagedNode) (target.Target, error) { return fake, nil }
+	defer func() { fromManagedNode = old }()
+
+	warnings := cleanupNetworkBackups(context.Background(), &state.DeploymentState{Nodes: []state.ManagedNode{{
+		Name: "net-node0", Runtime: "jar", InstallPath: "/srv/tron",
+	}}}, []string{"net-node0"})
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "net-node0") || !strings.Contains(warnings[0], "rm failed") {
+		t.Fatalf("warnings = %v, want cleanup warning", warnings)
 	}
 }

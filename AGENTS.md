@@ -439,7 +439,8 @@ trond network upgrade pn \
   --auto-rollback -o json
 # Output: {"network":"pn","version":"4.8.1","upgraded_count":N,
 #          "upgraded_nodes":[...],"steps":[{node,phase,status,...}],
-#          "status":"success"|"failed","failed_at":"..."?}
+#          "status":"success"|"failed","failed_at":"..."?,
+#          "warnings":[... ]?} (cleanup failures are warnings, not UPGRADE_ERROR)
 
 # 7. Cleanup. --confirm must match the network name (refuses typos).
 trond network destroy pn --confirm pn -o json

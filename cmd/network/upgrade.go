@@ -20,6 +20,7 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/output"
 	"github.com/tronprotocol/tron-deployment/internal/paths"
 	"github.com/tronprotocol/tron-deployment/internal/state"
+	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
 // upgradeCmd does a rolling upgrade across every node in a private
@@ -210,11 +211,8 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		"duration_ms":    time.Since(start).Milliseconds(),
 		"status":         "success",
 	}
-	for _, node := range upgraded {
-		if err := cleanupNetworkBackup(cmd.Context(), exe, st, node); err != nil {
-			return output.NewError("UPGRADE_ERROR", output.ExitGeneralError,
-				fmt.Sprintf("network upgrade succeeded but cleanup failed for %s: %v", node, err))
-		}
+	if warnings := cleanupNetworkBackups(cmd.Context(), st, upgraded); len(warnings) > 0 {
+		result["warnings"] = warnings
 	}
 	if outputFmt == "json" {
 		return output.WriteJSON(os.Stdout, result)
@@ -460,12 +458,32 @@ func runNetworkChild(ctx context.Context, exe string, st *state.DeploymentState,
 	return runChild(ctx, exe, argv...)
 }
 
-func cleanupNetworkBackup(ctx context.Context, exe string, st *state.DeploymentState, node string) error {
+var fromManagedNode = target.FromManagedNode
+
+func cleanupNetworkBackup(ctx context.Context, st *state.DeploymentState, node string) error {
 	for _, n := range st.Nodes {
 		if n.Name == node && n.Runtime == "jar" {
 			path := filepath.Join(n.InstallPath, "FullNode.jar.upgrade.backup")
-			return runChild(ctx, exe, "exec", node, "--", "sh", "-c", "rm -f -- "+path+"; printf '{}' ")
+			tgt, err := fromManagedNode(&n)
+			if err != nil {
+				return err
+			}
+			if closer, ok := tgt.(interface{ Close() error }); ok {
+				defer closer.Close()
+			}
+			_, err = tgt.Exec(ctx, "rm", "-f", "--", path)
+			return err
 		}
 	}
 	return nil
+}
+
+func cleanupNetworkBackups(ctx context.Context, st *state.DeploymentState, nodes []string) []string {
+	var warnings []string
+	for _, node := range nodes {
+		if err := cleanupNetworkBackup(ctx, st, node); err != nil {
+			warnings = append(warnings, fmt.Sprintf("failed to remove upgrade backup for %s: %v", node, err))
+		}
+	}
+	return warnings
 }

@@ -3,6 +3,30 @@
 Deferred work captured during reviews. Each item carries enough context to pick
 up cold.
 
+## P0 audit follow-ups
+
+- **Build source edge cases** — make `foldUntrackedFile` handle directories and
+  unreadable files without hard failure (`internal/build/source.go:91,111-134`).
+- **Windows state fsync** — resolve directory fsync failures and false failures
+  after rename in `Save` (`internal/state/store.go:107-117`).
+- **Local transport lifecycle** — fix the shared transport `Once` write/read
+  race and transport-pool leak (`internal/target/target.go:38-48,86-94`).
+- **Local stream termination** — align unconditional `StreamExec.Close`
+  termination with SSH `streamDone` behavior (`internal/target/local.go:40-69`).
+- **Rollback stop semantics** — document the inverted stop-failure behavior and
+  record it in CHANGELOG (`cmd/rollback.go:66-69`).
+- **Artifact hash failure** — prevent failed `ArtifactSHA256` probes from
+  retaining stale values and causing drift false positives
+  (`cmd/upgrade.go:86-89`, `cmd/rollback.go:79-82`).
+- **Destroy target resolution** — report every same-target resolution failure,
+  not only the first one (`cmd/network/destroy.go:104-157`).
+- **Auto-port overlays** — allow an overlay to explicitly disable inherited
+  `auto_ports` (`internal/intent/overlay.go:58,77-79`).
+- **Breaking changes log** — add a CHANGELOG Breaking section for strict YAML
+  fields, ParseMemoryGB, localhost-only `--monitor`, and versioned intent_hash.
+- **Replay block atomicity** — add a regression test for the intentional
+  `blockFail > 0` abort behavior (`tools/replay/replayer.go:301-304`).
+
 ## `snapshot clone --from-node` for SSH-target / named-volume nodes
 
 - **What:** `snapshot clone --from-node <name>` now resolves jar + docker
