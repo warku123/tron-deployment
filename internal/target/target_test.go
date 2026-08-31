@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -176,6 +177,22 @@ func TestCloseIdleConnectionsClosesCachedTransports(t *testing.T) {
 		t.Fatal("expected shared local transport")
 	}
 	CloseIdleConnections()
+}
+
+func TestLocalTransportConcurrentCloseIsRaceFree(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = HTTPClient(NewLocalTarget(), time.Second).Transport
+		}()
+		go func() {
+			defer wg.Done()
+			CloseIdleConnections()
+		}()
+	}
+	wg.Wait()
 }
 
 func TestSSHTargetConnectContextUnreachableReturnsPromptly(t *testing.T) {

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -63,6 +62,9 @@ func runRollback(cmd *cobra.Command, args []string) error {
 		writeAudit(auditEvent{Command: "rollback", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "ROLLBACK_ERROR", Start: start})
 		return exitWithError("ROLLBACK_ERROR", output.ExitGeneralError, fmt.Sprintf("Prepare rollback failed: %v", err))
 	}
+	// Stop failures are hard errors: do not activate a replacement artifact
+	// while the old process may still be running, or two artifacts could race
+	// for the same node resources.
 	if err := nc.Runtime.Stop(cmd.Context(), name); err != nil {
 		_ = tx.Cleanup(cmd.Context())
 		writeAudit(auditEvent{Command: "rollback", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "ROLLBACK_ERROR", Start: start})
@@ -77,8 +79,11 @@ func runRollback(cmd *cobra.Command, args []string) error {
 		return rollbackArtifact(cmd, nc, tx, name, currentVersion, start, fmt.Sprintf("start artifact: %v", err))
 	}
 	if nc.Node.Runtime == "jar" {
-		if digest, err := nc.Target.Sha256IfExists(cmd.Context(), filepath.Join(nc.Node.InstallPath, "FullNode.jar")); err == nil {
-			nc.Node.ArtifactSHA256 = digest
+		if err := refreshArtifactSHA256(cmd.Context(), nc); err != nil {
+			// The replacement artifact is running while state still records the
+			// old version/digest; leave the skew visible until a later success.
+			writeAudit(auditEvent{Command: "rollback", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "ROLLBACK_ERROR", Start: start})
+			return exitWithError("ROLLBACK_ERROR", output.ExitGeneralError, fmt.Sprintf("hash rollback artifact: %v", err))
 		}
 	}
 	if err := tx.Cleanup(cmd.Context()); err != nil {

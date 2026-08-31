@@ -110,27 +110,40 @@ func untrackedPaths(status string) []string {
 
 func foldUntrackedFile(h io.Writer, index int, root, path string) error {
 	fullPath := filepath.Join(root, filepath.FromSlash(path))
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return writeUntrackedMarker(h, index, path, "unreadable")
+	}
+	if info.IsDir() {
+		return writeUntrackedMarker(h, index, path, "directory")
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if _, err := os.Stat(fullPath); err != nil {
+			return writeUntrackedMarker(h, index, path, "unreadable")
+		}
+	}
 	file, err := os.Open(fullPath)
 	if err != nil {
-		return fmt.Errorf("read untracked file %q: %w", path, err)
+		return writeUntrackedMarker(h, index, path, "unreadable")
 	}
 	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("stat untracked file %q: %w", path, err)
-	}
 	// Include index, path, and size as framing; then stream the contents so
 	// large source files do not require a second in-memory copy.
 	if _, err := fmt.Fprintf(h, "untracked %d %d\x00%s\x00", index, info.Size(), path); err != nil {
 		return fmt.Errorf("hash untracked file %q: %w", path, err)
 	}
 	if _, err := io.Copy(h, file); err != nil {
-		return fmt.Errorf("hash untracked file %q: %w", path, err)
+		return writeUntrackedMarker(h, index, path, "unreadable")
 	}
 	if _, err := io.WriteString(h, "\x00"); err != nil {
 		return fmt.Errorf("hash untracked file %q: %w", path, err)
 	}
 	return nil
+}
+
+func writeUntrackedMarker(h io.Writer, index int, path, kind string) error {
+	_, err := fmt.Fprintf(h, "untracked %d marker:%s\x00%s\x00", index, kind, path)
+	return err
 }
 
 func (s *Source) runGit(ctx context.Context, args ...string) (string, error) {

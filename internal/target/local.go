@@ -56,12 +56,17 @@ func (t *LocalTarget) StreamExec(ctx context.Context, cmd string, args ...string
 	copyStream := func(src io.Reader) { defer wg.Done(); _, _ = io.Copy(pw, src) }
 	go copyStream(stdout)
 	go copyStream(stderr)
-	go func() { wg.Wait(); _ = pw.Close() }()
+	streamDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(streamDone)
+		_ = pw.Close()
+	}()
 	return &streamReader{ReadCloser: pr, terminate: func() {
 		if c.Process != nil {
 			_ = c.Process.Kill()
 		}
-	}, wait: func() error {
+	}, streamDone: streamDone, wait: func() error {
 		waitErr := c.Wait()
 		wg.Wait()
 		return waitErr

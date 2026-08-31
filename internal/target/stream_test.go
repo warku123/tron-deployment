@@ -39,6 +39,23 @@ func TestLocalTargetStreamExecMergesStderr(t *testing.T) {
 	}
 }
 
+func TestLocalTargetStreamExecNaturalEOFDoesNotKill(t *testing.T) {
+	r, err := NewLocalTarget().StreamExec(context.Background(), "sh", "-c", "trap 'printf killed' TERM; printf done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "done" {
+		t.Fatalf("natural EOF output = %q, want done without kill signal", data)
+	}
+}
+
 func TestLocalTargetStreamExecReturnsExitError(t *testing.T) {
 	r, err := NewLocalTarget().StreamExec(context.Background(), "sh", "-c", "printf bad >&2; exit 7")
 	if err != nil {

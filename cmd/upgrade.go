@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -84,8 +83,11 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		return rollbackUpgrade(cmd, nc, tx, name, previousVersion, start, fmt.Sprintf("start new artifact: %v", err))
 	}
 	if nc.Node.Runtime == "jar" {
-		if digest, err := nc.Target.Sha256IfExists(cmd.Context(), filepath.Join(nc.Node.InstallPath, "FullNode.jar")); err == nil {
-			nc.Node.ArtifactSHA256 = digest
+		if err := refreshArtifactSHA256(cmd.Context(), nc); err != nil {
+			// The new artifact is running while state still records the old
+			// version/digest; leave the skew visible until a later successful run.
+			writeAudit(auditEvent{Command: "upgrade", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "UPGRADE_ERROR", Start: start})
+			return exitWithError("UPGRADE_ERROR", output.ExitGeneralError, fmt.Sprintf("hash upgraded artifact: %v", err))
 		}
 	}
 	if err := tx.Cleanup(cmd.Context()); err != nil {

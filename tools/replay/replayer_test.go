@@ -101,8 +101,10 @@ func TestRunBroadcastFailureDoesNotAdvanceCursor(t *testing.T) {
 			broadcasts++
 			if broadcasts == 1 {
 				_, _ = w.Write([]byte(`{"result":true}`))
-			} else {
+			} else if broadcasts == 2 {
 				_, _ = w.Write([]byte(`{"result":false,"code":"FAIL","message":"failed"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"result":true}`))
 			}
 		default:
 			http.NotFound(w, req)
@@ -134,6 +136,16 @@ func TestRunBroadcastFailureDoesNotAdvanceCursor(t *testing.T) {
 	}
 	if got := loadState(statePath).LastMainnetBlock; got != 99 {
 		t.Fatalf("last_mainnet_block = %d, want 99", got)
+	}
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("retry Run: %v", err)
+	}
+	got := loadState(statePath)
+	if got.LastMainnetBlock != 100 || got.InProgressTxIndex != 0 {
+		t.Fatalf("retry state = %+v, want block 100 and reset tx index", got)
+	}
+	if broadcasts != 4 {
+		t.Fatalf("broadcasts after retry = %d, want 4 (successful tx replayed)", broadcasts)
 	}
 }
 

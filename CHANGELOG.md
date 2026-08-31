@@ -7,8 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Intent parsing now rejects unknown fields; invalid memory values now error
+  instead of falling back to 16 GB; `--monitor` no longer suppresses
+  `monitoring.enabled: true`. `extra_env` `$$` escaping is security
+  hardening, not a breaking change.
+
 ### Fixed
 
+- Upgrade and rollback now fail when artifact SHA256 probing fails instead of
+  retaining a stale digest that could produce a false drift result.
+- Untracked build-source directories, dangling links, and unreadable files are
+  represented by hash markers instead of aborting the build.
+- State save treats post-rename directory fsync as best-effort for platforms
+  that cannot sync directories.
+- Target overlays can explicitly disable inherited `auto_ports`.
+- Network destroy reports every node affected by a shared target-resolution
+  failure.
+- `intent_hash` now accepts the versioned `v2:` prefix.
 - SSH bootstrap provisioning mode is restored, so package-manager, shell, and
   user-creation commands are allowed only during `bootstrap`.
 - Network upgrade backup cleanup now executes `rm` through the target layer;

@@ -104,13 +104,16 @@ func (s *Store) Save(state *DeploymentState) error {
 		return fmt.Errorf("rename state file: %w", err)
 	}
 	// Sync the directory entry so a crash after rename cannot lose the name.
-	dir, err := os.Open(filepath.Dir(s.path))
+	dir, err := openStateDir(filepath.Dir(s.path))
 	if err != nil {
 		return fmt.Errorf("open state directory: %w", err)
 	}
 	if err := dir.Sync(); err != nil {
 		_ = dir.Close()
-		return fmt.Errorf("sync state directory: %w", err)
+		// The file was atomically renamed after its contents were synced.
+		// Directory fsync is unavailable on Windows, so this best-effort
+		// durability step is non-fatal once rename has succeeded.
+		return nil
 	}
 	if err := dir.Close(); err != nil {
 		return fmt.Errorf("close state directory: %w", err)
@@ -118,6 +121,13 @@ func (s *Store) Save(state *DeploymentState) error {
 
 	return nil
 }
+
+type stateDir interface {
+	Sync() error
+	Close() error
+}
+
+var openStateDir = func(path string) (stateDir, error) { return os.Open(path) }
 
 // GetNode returns the managed node by name, or nil if not found.
 func (s *Store) GetNode(state *DeploymentState, name string) *ManagedNode {

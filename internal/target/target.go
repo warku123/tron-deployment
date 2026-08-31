@@ -37,9 +37,12 @@ func HTTPClient(t Target, timeout time.Duration) *http.Client {
 
 var targetTransports sync.Map
 var localTransportOnce sync.Once
+var localTransportMu sync.Mutex
 var sharedLocalTransport *http.Transport
 
 func localTransport(d Dialer) *http.Transport {
+	localTransportMu.Lock()
+	defer localTransportMu.Unlock()
 	localTransportOnce.Do(func() {
 		sharedLocalTransport = http.DefaultTransport.(*http.Transport).Clone()
 		sharedLocalTransport.DialContext = d.DialContext
@@ -84,6 +87,8 @@ func targetIdentity(t Target) uintptr {
 // CloseIdleConnections releases pooled connections held by target-aware HTTP
 // transports. Long-lived callers should invoke it during shutdown.
 func CloseIdleConnections() {
+	localTransportMu.Lock()
+	defer localTransportMu.Unlock()
 	if sharedLocalTransport != nil {
 		sharedLocalTransport.CloseIdleConnections()
 	}
@@ -226,15 +231,24 @@ type StreamExec interface {
 
 type streamReader struct {
 	io.ReadCloser
-	wait      func() error
-	terminate func()
-	closeOnce sync.Once
-	closeErr  error
+	wait       func() error
+	terminate  func()
+	streamDone <-chan struct{}
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 func (r *streamReader) Close() error {
 	r.closeOnce.Do(func() {
-		r.terminate()
+		if r.streamDone == nil {
+			r.terminate()
+		} else {
+			select {
+			case <-r.streamDone:
+			default:
+				r.terminate()
+			}
+		}
 		err := r.ReadCloser.Close()
 		waitErr := r.wait()
 		if err != nil {

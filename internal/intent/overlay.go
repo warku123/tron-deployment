@@ -37,14 +37,20 @@ func LoadWithOverlay(basePath, overlayPath string) (*Intent, error) {
 	return base, nil
 }
 
-// mergeOverlay applies overlay YAML on top of the base intent.
-// Strategy: unmarshal overlay into a map, then re-marshal and unmarshal onto the base.
+// mergeOverlay applies overlay YAML on top of the base intent; it also parses
+// raw YAML to detect explicitly supplied zero values such as auto_ports:false.
 func mergeOverlay(base *Intent, overlayData []byte) error {
 	// Parse overlay as a partial intent
 	var overlay Intent
 	dec := yaml.NewDecoder(bytes.NewReader(overlayData))
 	dec.KnownFields(true)
 	if err := dec.Decode(&overlay); err != nil {
+		return fmt.Errorf("parse overlay YAML: %w", err)
+	}
+	var raw struct {
+		Target map[string]any `yaml:"target"`
+	}
+	if err := yaml.Unmarshal(overlayData, &raw); err != nil {
 		return fmt.Errorf("parse overlay YAML: %w", err)
 	}
 
@@ -55,7 +61,8 @@ func mergeOverlay(base *Intent, overlayData []byte) error {
 	if overlay.Network != "" {
 		base.Network = overlay.Network
 	}
-	if overlay.Target.Type != "" || overlay.Target.Host != "" || overlay.Target.Port != 0 || overlay.Target.User != "" || overlay.Target.IdentityFile != "" || overlay.Target.Runtime != "" || overlay.Target.AutoPorts {
+	_, autoPortsSet := raw.Target["auto_ports"]
+	if overlay.Target.Type != "" || overlay.Target.Host != "" || overlay.Target.Port != 0 || overlay.Target.User != "" || overlay.Target.IdentityFile != "" || overlay.Target.Runtime != "" || autoPortsSet {
 		if overlay.Target.Type != "" {
 			base.Target.Type = overlay.Target.Type
 		}
@@ -74,8 +81,8 @@ func mergeOverlay(base *Intent, overlayData []byte) error {
 		if overlay.Target.Runtime != "" {
 			base.Target.Runtime = overlay.Target.Runtime
 		}
-		if overlay.Target.AutoPorts {
-			base.Target.AutoPorts = true
+		if autoPortsSet {
+			base.Target.AutoPorts = overlay.Target.AutoPorts
 		}
 	}
 	if len(overlay.Nodes) > 0 {

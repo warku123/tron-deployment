@@ -2,9 +2,30 @@ package intent
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestOverlayCanDisableAutoPorts(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.yaml")
+	overlay := filepath.Join(dir, "overlay.yaml")
+	if err := os.WriteFile(base, []byte("name: m\nnetwork: mainnet\ntarget:\n  type: local\n  auto_ports: true\nnodes:\n  - type: fullnode\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(overlay, []byte("target:\n  auto_ports: false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadWithOverlay(base, overlay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Target.AutoPorts {
+		t.Fatal("explicit overlay false did not disable auto_ports")
+	}
+}
 
 // fields_test.go is the field-by-field matrix for intent validation. The
 // goal is to enumerate every typed field and exercise:

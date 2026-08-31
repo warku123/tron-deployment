@@ -16,6 +16,11 @@ import (
 	"github.com/tronprotocol/tron-deployment/internal/target"
 )
 
+type destroyFailure struct {
+	Name  string `json:"name"`
+	Error string `json:"error"`
+}
+
 var destroyConfirm string
 
 var destroyCmd = &cobra.Command{
@@ -89,37 +94,15 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	type failure struct {
-		Name  string `json:"name"`
-		Error string `json:"error"`
-	}
 	// Keep the recorded target for network-level cleanup before removing the
 	// nodes from state. Never fall back to the operator's local Docker daemon.
 	// Network create/add allow mixed targets. Keep one target per distinct
 	// target identity and run network-level cleanup on every one; this avoids
 	// assuming the first node represents the whole network.
-	networkTargets := make(map[string]target.Target)
-	var targetFailures []failure
-	failedTargetKeys := make(map[string]bool)
-	for _, n := range deployState.Nodes {
-		if !(strings.HasPrefix(n.Name, prefix) || n.Name == destroyConfirm) {
-			continue
-		}
-		key := fmt.Sprintf("%s|%s|%d|%s|%s", n.Target.Type, n.Target.Host, n.Target.Port, n.Target.User, n.Target.IdentityFile)
-		if _, ok := networkTargets[key]; ok {
-			continue
-		}
-		tgt, terr := resolveTargetForNode(&n)
-		if terr != nil {
-			targetFailures = append(targetFailures, failure{Name: n.Name, Error: "target cleanup: " + terr.Error()})
-			failedTargetKeys[key] = true
-			continue
-		}
-		networkTargets[key] = tgt
-	}
+	networkTargets, targetFailures, failedTargetKeys := collectNetworkTargets(deployState.Nodes, prefix, destroyConfirm)
 
 	var removed []string
-	var failures []failure
+	var failures []destroyFailure
 	failures = append(failures, targetFailures...)
 	auditResult := "success"
 	auditTarget := ""
@@ -142,12 +125,12 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 
 		tgt, terr := resolveTargetForNode(&n)
 		if terr != nil {
-			failures = append(failures, failure{Name: n.Name, Error: terr.Error()})
+			failures = append(failures, destroyFailure{Name: n.Name, Error: terr.Error()})
 			continue
 		}
 		rt := resolveRuntimeForNode(&n, tgt)
 		if rerr := rt.Remove(cmd.Context(), n.Name, true); rerr != nil {
-			failures = append(failures, failure{Name: n.Name, Error: rerr.Error()})
+			failures = append(failures, destroyFailure{Name: n.Name, Error: rerr.Error()})
 			closeTarget(tgt)
 			continue
 		}
@@ -206,6 +189,46 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			fmt.Sprintf("partial success: %d node(s) failed to destroy; removed entries are gone from state, failed entries REMAIN in state and can be retried", len(failures)))
 	}
 	return nil
+}
+
+var resolveTargetForDestroy = resolveTargetForNode
+
+func collectNetworkTargets(nodes []state.ManagedNode, prefix, confirm string) (map[string]target.Target, []destroyFailure, map[string]bool) {
+	networkTargets := make(map[string]target.Target)
+	var targetFailures []destroyFailure
+	failedTargetKeys := make(map[string]bool)
+	for i := range nodes {
+		n := &nodes[i]
+		if !(strings.HasPrefix(n.Name, prefix) || n.Name == confirm) {
+			continue
+		}
+		key := fmt.Sprintf("%s|%s|%d|%s|%s", n.Target.Type, n.Target.Host, n.Target.Port, n.Target.User, n.Target.IdentityFile)
+		if failedTargetKeys[key] {
+			continue
+		}
+		if _, ok := networkTargets[key]; ok {
+			continue
+		}
+		tgt, err := resolveTargetForDestroy(n)
+		if err != nil {
+			targetFailures = append(targetFailures, targetResolutionFailures(nodes, prefix, confirm, key, err)...)
+			failedTargetKeys[key] = true
+			continue
+		}
+		networkTargets[key] = tgt
+	}
+	return networkTargets, targetFailures, failedTargetKeys
+}
+
+func targetResolutionFailures(nodes []state.ManagedNode, prefix, confirm, key string, err error) []destroyFailure {
+	var failures []destroyFailure
+	for _, node := range nodes {
+		nodeKey := fmt.Sprintf("%s|%s|%d|%s|%s", node.Target.Type, node.Target.Host, node.Target.Port, node.Target.User, node.Target.IdentityFile)
+		if (strings.HasPrefix(node.Name, prefix) || node.Name == confirm) && nodeKey == key {
+			failures = append(failures, destroyFailure{Name: node.Name, Error: "target cleanup: " + err.Error()})
+		}
+	}
+	return failures
 }
 
 // resolveTargetForNode returns the right Target for a managed node.

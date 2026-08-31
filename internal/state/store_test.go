@@ -33,6 +33,24 @@ func TestLoad_EmptyFile(t *testing.T) {
 	}
 }
 
+func TestSaveIgnoresDirectorySyncFailureAfterRename(t *testing.T) {
+	s, path := newTempStore(t)
+	old := openStateDir
+	openStateDir = func(string) (stateDir, error) { return failingStateDir{}, nil }
+	t.Cleanup(func() { openStateDir = old })
+	if err := s.Save(&DeploymentState{}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("renamed state missing: %v", err)
+	}
+}
+
+type failingStateDir struct{}
+
+func (failingStateDir) Sync() error  { return os.ErrInvalid }
+func (failingStateDir) Close() error { return nil }
+
 func TestUpsertAndGetNode(t *testing.T) {
 	s, _ := newTempStore(t)
 	st, _ := s.Load()
