@@ -169,7 +169,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		if upgradeJarSHA256 != "" {
 			upgradeArgs = append(upgradeArgs, "--jar-sha256", upgradeJarSHA256)
 		}
-		err := runNetworkChild(cmd.Context(), exe, st, node, upgradeArgs...)
+		err, artifactSwapped := runNetworkChildResultFn(cmd.Context(), exe, st, node, upgradeArgs...)
 		steps = append(steps, upgradeStep{
 			Node:       node,
 			Phase:      "upgrade",
@@ -178,6 +178,11 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 			Error:      errString(err),
 		})
 		if err != nil {
+			// Rollback membership tracks mutation, not child exit status: a child
+			// can swap its artifact and then fail while refreshing or persisting state.
+			if artifactSwapped {
+				upgraded = append(upgraded, node)
+			}
 			return finishWithFailure(cmd.Context(), outputFmt, networkName, exe, st,
 				steps, upgraded, start, node, err)
 		}
@@ -256,27 +261,67 @@ func isWitnessNode(n state.ManagedNode) bool {
 }
 
 var runChild = runChildCommand
-var runChildWithEnv = runChildCommandWithEnv
+var runChildResult = runChildCommandWithResult
+var runChildWithEnvResult = runChildCommandWithEnvResult
+var runNetworkChildResultFn = runNetworkChildResult
 
 const (
 	networkUpgradeRestoreEnv  = "TROND_NETWORK_UPGRADE=1"
 	networkUpgradePreserveEnv = "TROND_PRESERVE_BACKUP=1"
+	networkUpgradeTargetEnv   = "TROND_NETWORK_UPGRADE_TARGET_VERSION"
+	networkUpgradePreviousEnv = "TROND_NETWORK_UPGRADE_PREVIOUS_VERSION"
 )
 
-func runChildCommand(ctx context.Context, exe string, argv ...string) error {
-	return runChildCommandWithEnv(ctx, exe, nil, argv...)
+// rollbackChildEnv carries the node metadata from immediately before the
+// attempted upgrade into the rollback child. The parent state is intentionally
+// not mutated during the network upgrade, so these are the pre-attempt values.
+func rollbackChildEnv(n *state.ManagedNode) []string {
+	return []string{
+		networkUpgradeRestoreEnv,
+		networkUpgradeTargetEnv + "=" + n.Version,
+		networkUpgradePreviousEnv + "=" + n.PreviousVersion,
+	}
 }
 
-func runChildCommandWithEnv(ctx context.Context, exe string, extraEnv []string, argv ...string) error {
+func runChildCommand(ctx context.Context, exe string, argv ...string) error {
+	err, _ := runChildCommandWithEnvResult(ctx, exe, nil, argv...)
+	return err
+}
+
+func runChildCommandWithResult(ctx context.Context, exe string, argv ...string) (error, bool) {
+	return runChildCommandWithEnvResult(ctx, exe, nil, argv...)
+}
+
+func runChildCommandWithEnvResult(ctx context.Context, exe string, extraEnv []string, argv ...string) (error, bool) {
 	argv = append(argv, "--output", "json")
 	cmd := exec.CommandContext(ctx, exe, argv...)
 	if len(extraEnv) > 0 {
-		cmd.Env = append(os.Environ(), extraEnv...)
+		cmd.Env = childEnv(extraEnv)
 	}
 	var stdout, stderr limitedBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	artifactSwapped := false
+	// Errors are emitted on stderr by the root command, while successful
+	// results are emitted on stdout. Parse both so upgrade failures can report
+	// whether the artifact was already activated. Malformed/absent envelopes
+	// conservatively exclude the node from rollback; this is residual risk.
+	envelope := stdout.Bytes()
+	if runErr != nil {
+		envelope = stderr.Bytes()
+	}
+	lines := bytes.Split(envelope, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		var value map[string]any
+		if json.Unmarshal(bytes.TrimSpace(lines[i]), &value) == nil {
+			if _, ok := value["error_code"]; ok {
+				artifactSwapped, _ = value["artifact_swapped"].(bool)
+				break
+			}
+		}
+	}
+	if runErr != nil {
 		if stderr.Len() > 0 {
 			suffix := ""
 			if stderr.limited || stderr.total > 1<<20 || stderr.Len() >= 1<<20 {
@@ -286,21 +331,34 @@ func runChildCommandWithEnv(ctx context.Context, exe string, extraEnv []string, 
 			if (stderr.limited || stderr.total > 1<<20 || stderr.Len() >= 1<<20) && len(text) > 256 {
 				text = text[:256]
 			}
-			return fmt.Errorf("child command failed: %w: %s%s", err, text, suffix)
+			return fmt.Errorf("child command failed: %w: %s%s", runErr, text, suffix), artifactSwapped
 		}
-		return err
+		return runErr, artifactSwapped
 	}
 	var value any
 	if err := json.Unmarshal(stdout.Bytes(), &value); err != nil {
-		return fmt.Errorf("child command returned invalid JSON: %w", err)
+		return fmt.Errorf("child command returned invalid JSON: %w", err), false
 	}
 	if _, ok := value.(map[string]any); !ok {
-		return fmt.Errorf("child command returned JSON that is not an object")
+		return fmt.Errorf("child command returned JSON that is not an object"), false
 	}
 	if stdout.limited || stderr.limited {
-		return fmt.Errorf("child command output exceeds 1MiB limit")
+		return fmt.Errorf("child command output exceeds 1MiB limit"), false
 	}
-	return nil
+	return nil, artifactSwapped
+}
+
+func childEnv(extraEnv []string) []string {
+	baseEnv := make([]string, 0, len(os.Environ())+len(extraEnv))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		switch key {
+		case "TROND_NETWORK_UPGRADE", networkUpgradeTargetEnv, networkUpgradePreviousEnv, "TROND_PRESERVE_BACKUP":
+			continue
+		}
+		baseEnv = append(baseEnv, entry)
+	}
+	return append(baseEnv, extraEnv...)
 }
 
 type limitedBuffer struct {
@@ -442,6 +500,11 @@ func finishWithFailure(ctx context.Context, outputFmt, networkName, exe string,
 }
 
 func runNetworkChild(ctx context.Context, exe string, st *state.DeploymentState, node string, argv ...string) error {
+	err, _ := runNetworkChildResult(ctx, exe, st, node, argv...)
+	return err
+}
+
+func runNetworkChildResult(ctx context.Context, exe string, st *state.DeploymentState, node string, argv ...string) (error, bool) {
 	if st != nil {
 		for _, n := range st.Nodes {
 			if n.Name != node || n.Runtime != "jar" || len(argv) == 0 {
@@ -449,13 +512,13 @@ func runNetworkChild(ctx context.Context, exe string, st *state.DeploymentState,
 			}
 			switch argv[0] {
 			case "rollback":
-				return runChildWithEnv(ctx, exe, []string{networkUpgradeRestoreEnv}, argv...)
+				return runChildWithEnvResult(ctx, exe, rollbackChildEnv(&n), argv...)
 			case "upgrade":
-				return runChildWithEnv(ctx, exe, []string{networkUpgradePreserveEnv}, argv...)
+				return runChildWithEnvResult(ctx, exe, []string{networkUpgradePreserveEnv}, argv...)
 			}
 		}
 	}
-	return runChild(ctx, exe, argv...)
+	return runChildResult(ctx, exe, argv...)
 }
 
 var fromManagedNode = target.FromManagedNode

@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.16.1",
+  "schema_version": "1.16.2",
   "entries": [
     {
       "name": "apply",
@@ -47,7 +47,7 @@
     },
     {
       "name": "error",
-      "hash": "64d75337eb0c375f14ba1ccbe51519be1ca8a5b02b6b053fc13934f72a227e36"
+      "hash": "a9d401f0ca83aa7bd4b3b14038a3e7d3f3dd55da44371d7ca6a6e1d95aa7d1e7"
     },
     {
       "name": "events",

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -23,6 +24,8 @@ var rollbackCmd = &cobra.Command{
 // saveRollbackState is a test injection seam; production default persists via nodeContext.SaveState.
 var saveRollbackState = func(nc *nodeContext) error { return nc.SaveState() }
 
+var resolveRollbackNodeContext = resolveNodeContextForWrite
+
 func init() {
 	rollbackCmd.Flags().StringVar(&rollbackJarURL, "jar-url", "", "Target-version JAR URL (jar runtime)")
 	rollbackCmd.Flags().StringVar(&rollbackJarSHA256, "jar-sha256", "", "Optional target-version JAR SHA256 (jar runtime)")
@@ -37,13 +40,14 @@ func runRollback(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	nc, err := resolveNodeContextForWrite(name)
+	nc, err := resolveRollbackNodeContext(name)
 	if err != nil {
 		return err
 	}
 	defer nc.Close()
 
-	if nc.Node.PreviousVersion == "" {
+	networkRestore := os.Getenv("TROND_NETWORK_UPGRADE") == "1"
+	if nc.Node.PreviousVersion == "" && !networkRestore {
 		return exitWithError("ROLLBACK_ERROR", output.ExitGeneralError,
 			fmt.Sprintf("No previous version recorded for %s", name),
 			"Rollback is only available after an upgrade")
@@ -51,6 +55,14 @@ func runRollback(cmd *cobra.Command, args []string) error {
 
 	currentVersion := nc.Node.Version
 	targetVersion := nc.Node.PreviousVersion
+	if networkRestore {
+		if value := os.Getenv("TROND_NETWORK_UPGRADE_TARGET_VERSION"); value != "" {
+			targetVersion = value
+		} else if targetVersion == "" {
+			targetVersion = currentVersion
+		}
+	}
+	preUpgradePreviousVersion, hasPreUpgradePreviousVersion := os.LookupEnv("TROND_NETWORK_UPGRADE_PREVIOUS_VERSION")
 
 	upgrader, supported := nc.Runtime.(runtime.ArtifactUpgrader)
 	if !supported {
@@ -92,7 +104,11 @@ func runRollback(cmd *cobra.Command, args []string) error {
 
 	// Commit state only after the replacement artifact is running.
 	nc.Node.Version = targetVersion
-	nc.Node.PreviousVersion = currentVersion
+	if networkRestore && hasPreUpgradePreviousVersion {
+		nc.Node.PreviousVersion = preUpgradePreviousVersion
+	} else {
+		nc.Node.PreviousVersion = currentVersion
+	}
 	nc.Node.Status = "running"
 	if err := persistNodeState("rollback", name, nc, start, saveRollbackState); err != nil {
 		return err

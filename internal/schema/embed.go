@@ -130,7 +130,7 @@ import (
 //	        gain `intent_hash`, matching what both commands already emit.
 //	        Existing schemas gain additive optional fields — PATCH (the
 //	        earlier additive bumps that took a MINOR were over-versioned).
-const SchemaVersion = "1.16.1"
+const SchemaVersion = "1.16.2"
 
 // JSONSchemaURLBase is the canonical URL prefix for individual output
 // schema files. Embedded $id values inside each schema mirror this so

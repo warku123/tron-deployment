@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Network auto-rollback now includes nodes whose upgrade artifact was activated
+  before a later child failure, using the `artifact_swapped` error-envelope fact;
+  schema contract bumped from 1.16.1 to 1.16.2. Network rollback also preserves
+  the pre-series `PreviousVersion` metadata so repeated rollbacks remain honest.
 - Upgrade and rollback now fail when artifact SHA256 probing fails instead of
   retaining a stale digest that could produce a false drift result.
 - Untracked build-source directories, dangling links, and unreadable files are

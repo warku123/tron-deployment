@@ -116,6 +116,9 @@ Every error JSON has the same shape:
 }
 ```
 
+Errors may also include optional top-level `artifact_swapped: true` when a new
+artifact was already activated and started but was not rolled back.
+
 Process `suggestions[]` in order. The first entry is the most
 prescriptive and usually fixes the issue automatically; later entries
 are alternative fixes for less-likely causes.

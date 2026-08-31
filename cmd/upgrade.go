@@ -84,10 +84,16 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	}
 	if nc.Node.Runtime == "jar" {
 		if err := refreshArtifactSHA256(cmd.Context(), nc); err != nil {
-			// The new artifact is running while state still records the old
-			// version/digest; leave the skew visible until a later successful run.
+			// The digest may be stale, but the running version is known. Persist
+			// that truth so a parent rollback can use the normal metadata path.
+			nc.Node.Version = upgradeVersion
+			nc.Node.PreviousVersion = previousVersion
+			nc.Node.Status = "running"
+			if persistErr := saveUpgradeState(nc); persistErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not persist running-version truth: %v\n", persistErr)
+			}
 			writeAudit(auditEvent{Command: "upgrade", Node: name, Target: nc.Target.String(), Result: "error", ErrorCode: "UPGRADE_ERROR", Start: start})
-			return exitWithError("UPGRADE_ERROR", output.ExitGeneralError, fmt.Sprintf("hash upgraded artifact: %v", err))
+			return markArtifactSwapped(exitWithError("UPGRADE_ERROR", output.ExitGeneralError, fmt.Sprintf("hash upgraded artifact: %v", err)))
 		}
 	}
 	if err := tx.Cleanup(cmd.Context()); err != nil {
@@ -99,7 +105,12 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	nc.Node.Version = upgradeVersion
 	nc.Node.Status = "running"
 	if err := persistNodeState("upgrade", name, nc, start, saveUpgradeState); err != nil {
-		return err
+		// The first save failed after activation. Retry best-effort with the
+		// true running version; preserve the original loud state error.
+		if persistErr := saveUpgradeState(nc); persistErr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not persist running-version truth: %v\n", persistErr)
+		}
+		return markArtifactSwapped(err)
 	}
 	writeAudit(auditEvent{Command: "upgrade", Node: name, Target: nc.Target.String(), Result: "success", Start: start})
 
@@ -110,6 +121,13 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		"previous_version": previousVersion,
 	})
 	return nil
+}
+
+func markArtifactSwapped(err error) error {
+	if se, ok := err.(*output.StructuredError); ok {
+		se.ArtifactSwapped = true
+	}
+	return err
 }
 
 func rollbackUpgrade(cmd *cobra.Command, nc *nodeContext, tx runtime.ArtifactTransaction, name, previousVersion string, start time.Time, cause string) error {
@@ -130,5 +148,9 @@ func rollbackUpgrade(cmd *cobra.Command, nc *nodeContext, tx runtime.ArtifactTra
 	if rollbackErr != nil {
 		msg = fmt.Sprintf("%s; rollback ALSO failed: %v", msg, rollbackErr)
 	}
-	return exitWithError("UPGRADE_ERROR", output.ExitGeneralError, msg, "Check logs: trond logs "+name, "Run diagnostics: trond diagnose "+name)
+	err := exitWithError("UPGRADE_ERROR", output.ExitGeneralError, msg, "Check logs: trond logs "+name, "Run diagnostics: trond diagnose "+name)
+	if rollbackErr != nil {
+		return markArtifactSwapped(err)
+	}
+	return err
 }
