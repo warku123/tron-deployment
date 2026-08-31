@@ -74,6 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sensitive witness data remains redacted, JAR configuration permissions are
   restricted, state saves are atomic with surfaced persistence errors, and
   replay cursors advance only after complete block replay.
+- Replay now aborts with a clear error when any transaction broadcast in a block
+  fails, and retries resume from the failed block boundary (AUD-009).
 
 ### Changed
 

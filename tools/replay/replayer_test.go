@@ -144,6 +144,7 @@ func TestRunBroadcastFailureDoesNotAdvanceCursor(t *testing.T) {
 	if got.LastMainnetBlock != 100 || got.InProgressTxIndex != 0 {
 		t.Fatalf("retry state = %+v, want block 100 and reset tx index", got)
 	}
+	// Re-broadcasting already-landed txs on retry is expected; see TODOS.md AUD-009.
 	if broadcasts != 4 {
 		t.Fatalf("broadcasts after retry = %d, want 4 (successful tx replayed)", broadcasts)
 	}

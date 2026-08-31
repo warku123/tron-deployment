@@ -5,6 +5,16 @@ up cold.
 
 ## Open audit follow-ups
 
+- **AUD-009 replay block-failure threshold** — aborting replay when any
+  transaction broadcast in a block fails is intentional, not a bug: the cursor
+  must never advance past a partially-failed block, or silently dropped
+  transactions can make the shadow chain diverge from mainnet. Retry resumes
+  at the failed block boundary; already-landed transactions are re-broadcast
+  as expected, pinned by `tools/replay/replayer_test.go` (`want 4` assertion).
+  Defer a configurable `--block-fail-threshold N` flag (default `0` = current
+  strict abort; `N > 0` tolerates ≤N failures per block, while all failures
+  remain in `failLog` and are reported in the summary) to a follow-up PR if
+  needed.
 - **AUD-020 transport-pool leak** — retire target-aware transports from the
   shared pool on every lifecycle path (`internal/target/target.go:38-48,86-94`).
 - **Windows support** — complete platform-specific lifecycle and filesystem
