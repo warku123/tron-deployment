@@ -461,21 +461,27 @@ func runNetworkChild(ctx context.Context, exe string, st *state.DeploymentState,
 var fromManagedNode = target.FromManagedNode
 
 func cleanupNetworkBackup(ctx context.Context, st *state.DeploymentState, node string) error {
-	for _, n := range st.Nodes {
-		if n.Name == node && n.Runtime == "jar" {
-			path := filepath.Join(n.InstallPath, "FullNode.jar.upgrade.backup")
-			tgt, err := fromManagedNode(&n)
-			if err != nil {
-				return err
-			}
-			if closer, ok := tgt.(interface{ Close() error }); ok {
-				defer closer.Close()
-			}
-			_, err = tgt.Exec(ctx, "rm", "-f", "--", path)
-			return err
+	var managedNode *state.ManagedNode
+	for i := range st.Nodes {
+		if st.Nodes[i].Name == node && st.Nodes[i].Runtime == "jar" {
+			managedNode = &st.Nodes[i]
+			break
 		}
 	}
-	return nil
+	if managedNode == nil {
+		return nil
+	}
+
+	path := filepath.Join(managedNode.InstallPath, "FullNode.jar.upgrade.backup")
+	tgt, err := fromManagedNode(managedNode)
+	if err != nil {
+		return err
+	}
+	if closer, ok := tgt.(interface{ Close() error }); ok {
+		defer closer.Close()
+	}
+	_, err = tgt.Exec(ctx, "rm", "-f", "--", path)
+	return err
 }
 
 func cleanupNetworkBackups(ctx context.Context, st *state.DeploymentState, nodes []string) []string {
